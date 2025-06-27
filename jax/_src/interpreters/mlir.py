@@ -1333,8 +1333,18 @@ def _set_up_aliases(input_output_aliases, avals_in, avals_out,
   if (arg_memory_kinds is None or result_memory_kinds is None or
       any(a is None for a in arg_memory_kinds) or
       any(r is None for r in result_memory_kinds)):
-    arg_memory_kinds = [None] * len(avals_in)
-    result_memory_kinds = [None] * len(avals_out)
+    # infer 'device' for donated args without explicit memory kinds
+    if (result_memory_kinds is not None and 
+        all(r is not None for r in result_memory_kinds) and
+        arg_memory_kinds is not None and 
+        any(a is None for a in arg_memory_kinds)):
+      arg_memory_kinds = [
+        'device' if mk is None and donated else mk
+        for mk, donated in zip(arg_memory_kinds, donated_args)
+      ]
+    else:
+      arg_memory_kinds = [None] * len(avals_in)
+      result_memory_kinds = [None] * len(avals_out)
 
   donations = collections.defaultdict(collections.deque)
   for i, (aval, am, donated, aliased) in enumerate(
