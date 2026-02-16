@@ -21,7 +21,6 @@ import jax
 from jax import random
 from jax._src import config
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 from jax.experimental.pallas.ops.gpu import blackwell_ragged_dot_mgpu
 from jax.experimental.pallas.ops.gpu import ragged_dot_mgpu
 from jax.experimental.pallas.ops.gpu import transposed_ragged_dot_mgpu
@@ -69,7 +68,6 @@ class RaggedDotTestCase(jtu.JaxTestCase):
     if (not jtu.test_device_matches(["cuda"]) or
         not jtu.is_cuda_compute_capability_equal("9.0")):
       self.skipTest("Only works on GPU with capability sm90a")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   @parameterized.product(
       block_m=(64, 128),
@@ -180,7 +178,6 @@ class RaggedDotTCGen05TestCase(jtu.JaxTestCase, jtu.CudaArchSpecificTest):
     if blackwell_ragged_dot_mgpu is None:
       self.skipTest("Mosaic GPU not available.")
     self.skip_unless_tcgen05()
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   @parameterized.product(
       grid_tile_width=(1, 8, 16),

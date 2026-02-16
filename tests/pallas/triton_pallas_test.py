@@ -23,7 +23,6 @@ from jax import lax
 from jax._src import config
 from jax._src import dtypes
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 from jax.experimental import pallas as pl
 import jax.numpy as jnp
 import numpy as np
@@ -51,12 +50,16 @@ class PallasBaseTest(jtu.JaxTestCase):
       if jtu.test_device_matches(["cuda"]) and \
          not jtu.is_cuda_compute_capability_at_least("9.0"):
         self.skipTest("Only works on GPU with capability >= sm90")
+      if plgpu is None:
+        self.skipTest("plgpu not available on this platform")
     else:
       self.skipTest("Test only works on CPU and GPU")
 
     super().setUp()
 
   def pallas_call(self, *args, **kwargs):
+    # Force the use of the Triton backend.
+    kwargs.setdefault("compiler_params", plgpu.CompilerParams())
     return pl.pallas_call(*args, **kwargs, interpret=self.INTERPRET)
 
 
@@ -66,11 +69,6 @@ DTYPE_LIST = [jnp.float32, jnp.float16, jnp.bfloat16,
 
 class TritonPallasTest(PallasBaseTest):
   INTERPRET = False
-
-  def setUp(self):
-    super().setUp()
-    # Force tests to use Triton.
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(False))
 
   @parameterized.product(src_dtype=DTYPE_LIST, dst_dtype=DTYPE_LIST)
   def test_fp_dtype_cast(self, src_dtype, dst_dtype):
@@ -102,9 +100,6 @@ class TritonPallasTest(PallasBaseTest):
       ("min_f32", "atomic_min", np.array([1, 2, 3, 4], np.float32), np.min),
   )
   def test_scalar_atomic(self, op, value, numpy_op):
-    if plgpu is None:
-      self.skipTest("plgpu not available on this platform.")
-
     op = getattr(plgpu, op)
 
     @functools.partial(
@@ -125,7 +120,7 @@ class TritonPallasTest(PallasBaseTest):
       else:
         # JAX on ROCm does not currently handle atomic fmin/fmax correctly
         if jtu.test_device_matches(["rocm"]):
-            self.skipTest("Atomic fmin/fmax not currently supported on ROCm.")
+          self.skipTest("Atomic fmin/fmax not currently supported on ROCm.")
         neutral = np.array(-float("inf"), value.dtype)
     elif op == plgpu.atomic_min:
       if np.issubdtype(value.dtype, np.integer):
@@ -133,7 +128,7 @@ class TritonPallasTest(PallasBaseTest):
       else:
         # JAX on ROCm does not currently handle atomic fmin/fmax correctly
         if jtu.test_device_matches(["rocm"]):
-            self.skipTest("Atomic fmin/fmax not currently supported on ROCm.")
+          self.skipTest("Atomic fmin/fmax not currently supported on ROCm.")
         neutral = np.array(float("inf"), value.dtype)
     elif op == plgpu.atomic_or:
       neutral = np.array(False, value.dtype)
@@ -365,10 +360,6 @@ class TritonPallasTest(PallasBaseTest):
     x = jnp.array([4.2, 2.4]).astype(jnp.float32)
     np.testing.assert_array_equal(kernel(x), x)
 
-  @unittest.skipIf(
-      sys.platform == "win32",
-      "plgpu.CompilerParams unavailable on Windows",
-  )
   def test_debug_print(self):
     if jtu.test_device_matches(["gpu"]):
       self.skipTest("This test flakes on gpu")
@@ -376,9 +367,7 @@ class TritonPallasTest(PallasBaseTest):
     @functools.partial(
         self.pallas_call,
         out_shape=jax.ShapeDtypeStruct((2,), jnp.float32),
-        compiler_params=plgpu.CompilerParams(
-            num_warps=1, num_stages=1
-        ),
+        compiler_params=plgpu.CompilerParams(num_warps=1, num_stages=1),
     )
     def kernel(x_ref, o_ref):
       pl.debug_print("It works!")
@@ -489,9 +478,10 @@ def matmul(x, y, *, bm, bn, gm, bk, interpret, debug=False):
   @functools.partial(
       pl.pallas_call,
       out_shape=jax.ShapeDtypeStruct((m, n), jnp.float32),
+      grid=pl.cdiv(m, bm) * pl.cdiv(n, bn),
       interpret=interpret,
       debug=debug,
-      grid=pl.cdiv(m, bm) * pl.cdiv(n, bn),
+      compiler_params=plgpu.CompilerParams(),
   )
   def matmul_kernel(x_ref, y_ref, o_ref):
     pid = pl.program_id(axis=0).astype(intx)

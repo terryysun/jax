@@ -100,6 +100,7 @@ class PallasCallRemoteDMATest(TestCase):
               plgpu.SemaphoreType.REGULAR,
               plgpu.SemaphoreType.REGULAR,
           ],
+          compiler_params=plgpu.CompilerParams(),
       )(x)
 
     devices = jax.devices()[:2]
@@ -137,6 +138,7 @@ class PallasCallRemoteDMATest(TestCase):
               plgpu.SemaphoreType.REGULAR,
               plgpu.SemaphoreType.REGULAR,
           ],
+          compiler_params=plgpu.CompilerParams(),
       )(x)
 
     devices = jax.devices()[:2]
@@ -229,6 +231,7 @@ class PallasCallRemoteDMATest(TestCase):
               plgpu.SemaphoreType.REGULAR,
               plgpu.SemaphoreType.REGULAR,
           ],
+          compiler_params=plgpu.CompilerParams(),
       )(x)
 
     devices = jax.devices()[:2]
@@ -267,6 +270,7 @@ class PallasCallRemoteDMATest(TestCase):
               plgpu.SemaphoreType.REGULAR,
               plgpu.SemaphoreType.REGULAR,
           ],
+          compiler_params=plgpu.CompilerParams(),
       )(x)
 
     devices = jax.devices()[:2]
@@ -303,6 +307,7 @@ class PallasCallRemoteDMATest(TestCase):
           out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
           out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
           scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+          compiler_params=plgpu.CompilerParams(),
       )(x)
 
     devices = jax.devices()[:4]
@@ -332,6 +337,7 @@ class PallasCallRemoteDMATest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+        compiler_params=plgpu.CompilerParams(),
     )
 
     devices = jax.devices()[:2]
@@ -360,6 +366,7 @@ class PallasCallRemoteDMATest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+        compiler_params=plgpu.CompilerParams(),
     )
 
     devices = jax.devices()[:2]
@@ -390,6 +397,7 @@ class PallasCallRemoteDMATest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR] * 2,
+        compiler_params=plgpu.CompilerParams(),
     )
 
     devices = jax.devices()[:2]
@@ -420,6 +428,7 @@ class PallasCallRemoteDMATest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+        compiler_params=plgpu.CompilerParams(),
     )
 
     devices = jax.devices()[:2]
@@ -442,6 +451,7 @@ class PallasCallRemoteDMATest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((8, 128), jnp.float32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+        compiler_params=plgpu.CompilerParams(),
     )
     mesh = jax.sharding.Mesh(jax.devices()[::-1], ['x'])  # Reverse the devices.
     f = jax.jit(
@@ -491,6 +501,7 @@ class PallasCallRemoteDMATest(TestCase):
             plgpu.SMEM((128, 128), jnp.int32, transforms=transforms),
             plgpu.SemaphoreType.REGULAR,
         ],
+        compiler_params=plgpu.CompilerParams(),
     )
     mesh = jtu.create_mesh((1, 2), ("x", "y"))
     y = jax.jit(
@@ -546,6 +557,7 @@ class PallasCallMultimemTest(TestCase):
         out_specs=pl.BlockSpec(memory_space=plgpu.GMEM),
         out_shape=jax.ShapeDtypeStruct((128, 128), jnp.int32),
         scratch_shapes=[plgpu.SemaphoreType.REGULAR],
+        compiler_params=plgpu.CompilerParams(),
     )
     mesh = jax.sharding.Mesh(jax.devices(), ['x'])
     y = jax.jit(
@@ -581,6 +593,7 @@ class PallasCallMultimemTest(TestCase):
             plgpu.SMEM((128, 128), jnp.int32, transforms=transforms),
             plgpu.SemaphoreType.REGULAR,
         ],
+        compiler_params=plgpu.CompilerParams(),
     )
     mesh = jax.sharding.Mesh(jax.devices(), ['x'])
     y = jax.jit(
@@ -684,6 +697,7 @@ class PallasCallMultimemTest(TestCase):
                 # insert the copy that puts the operand in symmetric memory,
                 # which causes the kernel to crash.
                 input_output_aliases={0: 1},
+                compiler_params=plgpu.CompilerParams(),
             ),
             mesh=mesh,
             in_specs=P("x"),

@@ -24,7 +24,6 @@ from jax import random
 from jax._src import config
 from jax._src import dtypes
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 from jax.experimental import pallas as pl
 import jax.numpy as jnp
 import numpy as np
@@ -54,11 +53,14 @@ class PallasBaseTest(jtu.JaxTestCase):
       self.skipTest("Only works on non-Windows platforms")
 
     super().setUp()
-    # TODO(bchetioui): Remove this once tests are all compatible with
-    # Pallas/Mosaic GPU.
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(False))
 
   def pallas_call(self, *args, **kwargs):
+    if jtu.test_device_matches(["gpu"]):
+      # TODO(bchetioui): Remove this once tests are all compatible with
+      # Pallas/Mosaic GPU.
+      from jax.experimental.pallas import triton as pltriton
+      assert "compiler_params" not in kwargs
+      kwargs["compiler_params"] = pltriton.CompilerParams()
     return pl.pallas_call(*args, **kwargs, interpret=self.INTERPRET)
 
 

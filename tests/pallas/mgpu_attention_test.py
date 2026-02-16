@@ -21,7 +21,6 @@ from absl.testing import absltest, parameterized
 from jax._src import config
 from jax._src import test_util as jtu
 from jax._src.lib import cuda_versions
-from jax._src.pallas import pallas_call
 import jax.numpy as jnp
 
 # pylint: disable=g-import-not-at-top
@@ -49,7 +48,6 @@ class FlashAttentionTestCase(jtu.JaxTestCase):
     if (not jtu.test_device_matches(["cuda"]) or
         not jtu.is_cuda_compute_capability_equal("9.0")):
       self.skipTest("Only works on GPU with capability sm90a")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   @parameterized.product(
       batch_size=(1, 4),

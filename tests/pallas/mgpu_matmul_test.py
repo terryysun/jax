@@ -22,7 +22,6 @@ import jax
 from jax._src import config
 from jax._src import dtypes
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 import jax.experimental.mosaic.gpu  # noqa: F401
 from jax.experimental.pallas.ops.gpu import blackwell_matmul_mgpu
 from jax.experimental.pallas.ops.gpu import hopper_matmul_mgpu
@@ -48,7 +47,6 @@ class MatrixMultiplicationTCGen05Test(jtu.JaxTestCase, jtu.CudaArchSpecificTest)
     super().setUp()
     if not jtu.test_device_matches(["cuda"]):
       self.skipTest("Test requires an NVIDIA GPU")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   @parameterized.product(
       m=(1024, 4096),
@@ -88,7 +86,6 @@ class MatrixMultiplicationSm90ATest(jtu.JaxTestCase):
     super().setUp()
     if not jtu.test_device_matches(["cuda"]):
       self.skipTest("Test requires an NVIDIA GPU")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   @parameterized.product(
       m=(4096,),

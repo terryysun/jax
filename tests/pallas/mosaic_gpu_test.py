@@ -39,7 +39,6 @@ from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import arith as arith_dialect
 from jax._src.lib.mlir.dialects import gpu as gpu_dialect
 from jax._src.pallas import core as pallas_core
-from jax._src.pallas import pallas_call
 from jax._src.pallas import primitives as pallas_primitives
 from jax._src.pallas.mosaic_gpu import core as gpu_core
 from jax._src.pallas.mosaic_gpu import lowering as mgpu_lowering
@@ -138,7 +137,6 @@ class PallasTest(jtu.JaxTestCase, metaclass=PallasTestMetaclass):
   def setUp(self, *, artificial_shared_memory_limit=jtu._SMEM_SIZE_BOUND_FOR_TESTS):
     if not jtu.is_cuda_compute_capability_at_least("9.0"):
       self.skipTest("Only works on a GPU with capability >= sm90")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
     super().setUp()
     self.enter_context(mgpu.core.artificial_shared_memory_limit(artificial_shared_memory_limit))

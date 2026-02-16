@@ -20,7 +20,6 @@ from absl.testing import absltest
 import jax
 from jax._src import config
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import mosaic_gpu as plgpu
 import jax.numpy as jnp
@@ -55,7 +54,6 @@ class TorchTest(jtu.JaxTestCase):
     if (not jtu.test_device_matches(["cuda"]) or
         not jtu.is_cuda_compute_capability_at_least("9.0")):
       self.skipTest("Only works on GPU with capability sm90a+")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   def test_simple_pallas_call(self):
     @plgpu.as_torch_kernel

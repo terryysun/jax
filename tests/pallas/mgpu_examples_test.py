@@ -22,14 +22,13 @@ import statistics
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import lax
-from jax.extend import backend
 from jax._src import config
 from jax._src import test_util as jtu
-from jax._src.pallas import pallas_call
 import jax.experimental.mosaic.gpu  # noqa: F401
+from jax.experimental.mosaic.gpu import profiler
 import jax.experimental.pallas as pl
 import jax.experimental.pallas.mosaic_gpu as plgpu
-from jax.experimental.mosaic.gpu import profiler
+from jax.extend import backend
 import jax.numpy as jnp
 import numpy as np
 
@@ -862,7 +861,6 @@ class MatmulTutorialTCGen05Test(jtu.JaxTestCase, jtu.CudaArchSpecificTest):
     if not jtu.test_device_matches(["cuda"]):
       self.skipTest("Test requires an NVIDIA GPU")
     self.skip_unless_tcgen05()
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
 
   def benchmark(self, matmul_impl, a, b, config_search_space):
     if not self.BENCHMARK:

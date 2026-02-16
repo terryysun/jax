@@ -25,7 +25,6 @@ from jax import random
 from jax._src import test_multiprocess as jt_multiprocess
 from jax._src import test_util as jtu
 from jax._src.config import config as jax_config
-from jax._src.pallas import pallas_call
 from jax.experimental.mosaic import gpu as mgpu
 from jax.experimental.pallas.ops.gpu import collective_matmul_mgpu
 import jax.numpy as jnp
@@ -65,7 +64,6 @@ class CollectiveMatmulTestCase(jtu.JaxTestCase):
       self.skipTest("Test requires multiple processes.")
     if os.environ.get("XLA_PYTHON_CLIENT_ALLOCATOR", "") == "platform":
       self.skipTest("NVSHMEM doesn't work with the platform allocator.")
-    self.enter_context(pallas_call._PALLAS_USE_MOSAIC_GPU(True))
     num_devices = jax.device_count()
     mesh = jax.make_mesh(
         (num_devices,), ("x",), axis_types=(jax.sharding.AxisType.Explicit,)

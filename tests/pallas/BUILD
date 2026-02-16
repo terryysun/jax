@@ -468,7 +468,6 @@ jax_multiplatform_test(
         "gpu_b200x2",
     ],
     env = {
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
     },
     tags = [
@@ -495,9 +494,6 @@ jax_multiplatform_test(
         "gpu_h100x2",
         "gpu_b200x2",
     ],
-    env = {
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
-    },
     tags = [
         "mosaic_gpu_test",
         "multiaccelerator",
@@ -913,9 +909,6 @@ jax_multiplatform_test(
         "gpu_h100_x32",
         "gpu_b200",
     ],
-    env = {
-        "JAX_PALLAS_USE_MOSAIC_GPU": "0",
-    },
     shard_count = 1,
     deps = [
         "//jax/experimental:pallas",
@@ -1174,7 +1167,6 @@ jax_multiplatform_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
         "FAIL_ON_NVSHMEM_UNAVAILABLE": "",
     },
     shard_count = 8,
@@ -1199,9 +1191,6 @@ jax_multiplatform_test(
         "gpu_h100x2",
         "gpu_b200x2",
     ],
-    env = {
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
-    },
     tags = [
         "manual",
         "multiaccelerator",
@@ -1247,7 +1236,6 @@ jax_multiplatform_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
     },
     tags = [
         "manual",
@@ -1269,9 +1257,6 @@ jax_multiplatform_test(
     enable_configs = [
         "gpu_h100x2",
     ],
-    env = {
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
-    },
     tags = [
         "manual",
         "multiaccelerator",
@@ -1297,7 +1282,6 @@ jax_multiplatform_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
     },
     tags = [
         "manual",
@@ -1325,7 +1309,6 @@ jax_multiplatform_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
-        "JAX_PALLAS_USE_MOSAIC_GPU": "1",
     },
     tags = [
         "manual",
