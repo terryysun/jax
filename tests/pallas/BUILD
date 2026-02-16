@@ -1331,6 +1331,7 @@ jax_multiplatform_test(
         "manual",
         "mosaic_gpu_test",
         "multiaccelerator",
+        "notap",
     ],
     deps = [
         "//jax/_src:test_multiprocess",
