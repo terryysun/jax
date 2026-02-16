@@ -30,8 +30,7 @@ from jax._src.tree_util import (
     generate_key_paths, broadcast_prefix, prefix_errors,
     none_leaf_registry, broadcast_flattened_prefix_with_treedef)
 from jax._src import linear_util as lu
-from jax._src.util import (safe_map, WrapKwArgs, HashableFunction,
-                           Unhashable, safe_zip)
+from jax._src.util import safe_map, HashableFunction, Unhashable, safe_zip
 from jax._src import traceback_util
 
 traceback_util.register_exclusion(__file__)
@@ -249,11 +248,6 @@ def _ensure_inbounds(allow_invalid: bool, num_args: int, argnums: Sequence[int]
     result.append(i % num_args)  # Resolve negative
   return tuple(result)
 
-def _split_args(static_argnums, args, allow_invalid):
-  static_argnums = _ensure_inbounds(allow_invalid, len(args), static_argnums)
-  dyn_argnums = tuple(i for i in range(len(args)) if i not in static_argnums)
-  dyn_args = tuple(args[i] for i in dyn_argnums)
-  return static_argnums, dyn_argnums, dyn_args
 
 @lu.transformation2
 def _argnums_partial(_fun: Callable,
@@ -266,11 +260,6 @@ def _argnums_partial(_fun: Callable,
   fixed_args_ = iter(_fixed_args)
   args = [next(fixed_args_).val if x is sentinel else x for x in args]
   assert next(fixed_args_, sentinel) is sentinel
-  return _fun(*args, **kwargs)
-
-@lu.transformation2
-def _argnames_partial(_fun, _fixed_kwargs: WrapKwArgs, *args, **dyn_kwargs):
-  kwargs = dict({k: v.val for k, v in _fixed_kwargs.val.items()}, **dyn_kwargs)
   return _fun(*args, **kwargs)
 
 

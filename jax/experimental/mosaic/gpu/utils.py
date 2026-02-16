@@ -2066,18 +2066,6 @@ def nvvm_mbarrier_arrive_expect_tx(barrier: ir.Value, expect_tx: ir.Value, predi
     return nvvm.mbarrier_arrive_expect_tx(barrier, expect_tx, predicate=predicate)  # pytype: disable=missing-parameter
 
 
-def elements_to_bytes(offset: ir.Value, element_bitwidth: int) -> ir.Value:
-  """Convert an element-based linear offset to a byte-based offset."""
-  index_ty = offset.type
-
-  if element_bitwidth > 8:
-    return arith.muli(offset, c(element_bitwidth // 8, index_ty))
-  elif element_bitwidth < 8:
-    return arith.divsi(offset, c(8 // element_bitwidth, index_ty))
-  else:
-    return offset
-
-
 def get_cluster_ptr(ptr: ir.Value, cluster_block: ir.Value):
   i32 = ir.IntegerType.get_signless(32)
   assert cluster_block.type == i32, cluster_block.type

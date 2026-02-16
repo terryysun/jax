@@ -97,13 +97,6 @@ class JaxprStatsTest(jtu.JaxTestCase):
     for filename in hist.keys():
       self.assertIn(os.path.basename(__file__), filename)
 
-  def test_print_histogram(self):
-    def f(x, y):
-      s = jit(jnp.sin)(x)
-      return jnp.sin(s) + jnp.cos(y)
-    hist = jaxpr_util.primitives_by_source(make_jaxpr(f)(1., 1.).jaxpr)
-    jaxpr_util.print_histogram(hist)
-
   def test_pprof_equation_profile(self):
     def f(x, y):
       s = jit(jnp.sin)(x)

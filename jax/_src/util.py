@@ -217,12 +217,6 @@ def subs_list2(
   assert next(base_, sentinel) is sentinel
   return out
 
-def split_dict(dct: dict[T1, T2], names: Sequence[T1]) -> list[T2]:
-  dct = dict(dct)
-  lst = [dct.pop(name) for name in names]
-  assert not dct
-  return lst
-
 def concatenate(xs: Iterable[Sequence[T]]) -> list[T]:
   """Concatenates/flattens a list of lists."""
   return list(it.chain.from_iterable(xs))
@@ -259,29 +253,6 @@ def curry(f):
 
 toposort: Callable[[Iterable[Any]], list[Any]]
 toposort = partial(jaxlib_utils.topological_sort, "parents")
-
-
-def split_merge(
-    predicate: Callable[[T], bool],
-    xs: Sequence[T]
-) -> tuple[list[T], list[T], Callable[[Sequence[T], Sequence[T]], list[T]]]:
-  sides = list(map(predicate, xs))
-  lhs = [x for x, s in zip(xs, sides) if s]
-  rhs = [x for x, s in zip(xs, sides) if not s]
-  def merge(new_lhs, new_rhs):
-    out = []
-    for s in sides:
-      if s:
-        out.append(new_lhs[0])
-        new_lhs = new_lhs[1:]
-      else:
-        out.append(new_rhs[0])
-        new_rhs = new_rhs[1:]
-    assert not new_rhs
-    assert not new_lhs
-    return out
-
-  return lhs, rhs, merge
 
 
 def cache(max_size=4096, trace_context_in_key: bool | Callable = True):

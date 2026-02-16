@@ -731,9 +731,6 @@ def expand_platform_alias(platform: str) -> list[str]:
   """
   return _alias_to_platforms.get(platform, [platform])
 
-def is_gpu(platform):
-  return platform in ("cuda", "rocm")
-
 
 def backends_are_initialized() -> bool:
   "Returns true if backends have already been initialized."

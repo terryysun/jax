@@ -691,15 +691,6 @@ def _inspect_sharding_lowering_rule(ctx: mlir.LoweringRuleContext, value, *,
   return []
 mlir.register_lowering(inspect_sharding_p, _inspect_sharding_lowering_rule)
 
-def inspect_sharding_prop_user_sharding(sharding, backend_string):
-  del sharding, backend_string
-  return []
-
-def inspect_sharding_infer_sharding_from_operands(arg_shapes, arg_shardings,
-                                                  shape, backend_string):
-  del arg_shapes, shape, backend_string
-  return arg_shardings[0]
-
 def _slice_to_chunk_idx(size: int, slc: slice) -> int:
   if slc.stop == slc.start == None:
     return 0

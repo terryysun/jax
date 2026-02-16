@@ -1733,11 +1733,6 @@ def valid_jaxtype(x) -> bool:
     else:
       return True
 
-def check_valid_jaxtype(x):
-  if not valid_jaxtype(x):
-    raise TypeError(
-      f"Value {x!r} of type {type(x)} is not a valid JAX type")
-
 
 def mem_kind_to_space(mem_kind: str) -> MemorySpace:
   if mem_kind == 'pinned_host':
