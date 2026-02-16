@@ -293,6 +293,7 @@ def TPU_StoreOp : TPU_Op<"store", [DefaultMemWrite, AttrSizedOperandSegments]> {
   let assemblyFormat = [{
     $base `[` $indices `]` `,` $valueToStore (`masked` $mask^)? `sublanes` $sublane_mask  (`sublane_stride` $sublane_stride^)? attr-dict `:` type($base) `,` type($valueToStore) `,` type($mask)
   }];
+  let hasCanonicalizeMethod = 1;
 }
 
 def TPU_LoadOp : TPU_Op<"load", [DefaultMemRead]> {
@@ -311,6 +312,7 @@ def TPU_LoadOp : TPU_Op<"load", [DefaultMemRead]> {
     When `indices` are negative, it means loading from negative offset
     of `base` address.
   }];
+  let hasCanonicalizeMethod = 1;
 }
 
 // TODO(jevinjiang): migrate tpu.strided_store to general vector store op.
@@ -1271,6 +1273,7 @@ def TPU_EnqueueDMAOp : TPU_Op<"enqueue_dma", [AttrSizedOperandSegments]> {
   }];
   let hasVerifier = 1;
   let hasCanonicalizeMethod = 1;
+  let hasFolder = 1;
   let builders = [
     // A backward-compatible builder that sets `core_type` to nullptr.
     OpBuilder<(ins "Value":$source, "Value":$source_semaphore,
@@ -1333,6 +1336,7 @@ def TPU_EnqueueIndirectDMAOp : TPU_Op<"enqueue_indirect_dma">, IndirectDMAOp {
                                 MemRefType operand_ty);
   }];
   let hasCanonicalizeMethod = 1;
+  let hasFolder = 1;
 }
 
 // tpu.wait_dma2 waits for a DMA to complete.

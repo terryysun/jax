@@ -293,14 +293,13 @@ def kernel(
             collective_axes=_thread_name,
             **(scratch_shapes if isinstance(scratch_shapes, Mapping) else {}),
         )
-      if mesh.kernel_name is not None:
-        cmap_body.__name__ = mesh.kernel_name
-      else:
-        # The body function name is used to set the name of the kernel as a
-        # fallback if the kernel name is not set explicitly.
-        cmap_body.__name__ = getattr(body, "__name__", "anonymous")
+      name = (
+          getattr(body, "__name__", "anonymous")
+          if mesh.kernel_name is None
+          else mesh.kernel_name
+      )
       pallas_core.core_map(
-          mesh, compiler_params=compiler_params, interpret=interpret
+          mesh, compiler_params=compiler_params, interpret=interpret, name=name
       )(cmap_body)
     _, outs = state_discharge.run_state(stateful)((
         operands,
@@ -312,14 +311,14 @@ def kernel(
   def _vmap_rule(axis_size, in_batched, *args):
     axis_name = object()
 
-    def batched_body(*refs):
+    def batched_body(*refs, **scratch_ref_kwargs):
       idx = lax.axis_index(axis_name)
       lens = (len(args), len(out_shape))
       operand_refs, out_refs, scratch_refs = util.split_list(refs, lens)
       slice_ref = lambda r, b=True: (r.at[idx] if b else r)
       operand_refs = tree_util.tree_map(slice_ref, operand_refs, in_batched)
       out_refs = tree_util.tree_map(slice_ref, out_refs)
-      return body(*operand_refs, *out_refs, *scratch_refs)
+      return body(*operand_refs, *out_refs, *scratch_refs, **scratch_ref_kwargs)
 
     out_shape_ = out_shape[0] if unwrap_out else out_shape
     add_batch_dim = lambda x: x.update(shape=(axis_size, *x.shape))

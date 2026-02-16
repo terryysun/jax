@@ -651,6 +651,14 @@ LogicalResult MemRefBitcastOp::canonicalize(MemRefBitcastOp op,
   return success();
 }
 
+LogicalResult LoadOp::canonicalize(LoadOp op, PatternRewriter &rewriter) {
+  return propagateTiledLayoutToConsumer(op, rewriter);
+}
+
+LogicalResult StoreOp::canonicalize(StoreOp op, PatternRewriter &rewriter) {
+  return propagateTiledLayoutToConsumer(op, rewriter);
+}
+
 template <typename Op>
 LogicalResult verifyStridedOp(Op op, MemRefType memref_ty,
                               VectorType vector_ty, int64_t min_stride) {
@@ -1396,6 +1404,10 @@ LogicalResult EnqueueDMAOp::canonicalize(EnqueueDMAOp op,
   return propagateTiledLayoutToConsumer(op, rewriter);
 }
 
+LogicalResult EnqueueDMAOp::fold(FoldAdaptor, SmallVectorImpl<OpFoldResult>&) {
+  return memref::foldMemRefCast(*this);
+}
+
 LogicalResult EnqueueIndirectDMAOp::verifyGather(
     MemRefType operand_ty, ArrayRef<int64_t> offsets_shape,
     MemRefType result_ty) {
@@ -1579,6 +1591,11 @@ LogicalResult EnqueueIndirectDMAOp::verify() {
 LogicalResult EnqueueIndirectDMAOp::canonicalize(EnqueueIndirectDMAOp op,
                                                  PatternRewriter& rewriter) {
   return propagateTiledLayoutToConsumer(op, rewriter);
+}
+
+LogicalResult EnqueueIndirectDMAOp::fold(FoldAdaptor,
+                                         SmallVectorImpl<OpFoldResult>&) {
+  return memref::foldMemRefCast(*this);
 }
 
 // TODO(b/395630795): Remove after 2025-08-10.

@@ -1935,6 +1935,8 @@ class ScalarSubcoreTest(PallasSCTest):
       first_parallel=[False, True], second_parallel=[False, True]
   )
   def test_parallel_loop(self, first_parallel, second_parallel):
+    if not jtu.is_cloud_tpu_at_least(2026, 2, 13):
+      self.skipTest("Requires a newer libtpu")
     self.skip_if_tc_tiling()
     x = jnp.arange(self.num_lanes * self.num_lanes).reshape(
         self.num_lanes, self.num_lanes
@@ -1968,6 +1970,8 @@ class ScalarSubcoreTest(PallasSCTest):
     np.testing.assert_array_equal(kernel(x), x + 1)
 
   def test_parallel_loop_with_carry(self):
+    if not jtu.is_cloud_tpu_at_least(2026, 2, 13):
+      self.skipTest("Requires a newer libtpu")
     self.skip_if_tc_tiling()
     x = jnp.arange(self.num_lanes * self.num_lanes).reshape(
         self.num_lanes, self.num_lanes
@@ -1998,6 +2002,27 @@ class ScalarSubcoreTest(PallasSCTest):
         kernel(x), x + jnp.arange(1, self.num_lanes + 1)[:, None]
     )
 
+  def test_dma_memory_space(self):
+    if not jtu.is_cloud_tpu_at_least(2026, 2, 13):
+      self.skipTest("Requires a newer libtpu")
+    x = jnp.arange(self.num_lanes)
+
+    @functools.partial(
+        pl.pallas_call,
+        compiler_params=pltpu.CompilerParams(
+            kernel_type=pltpu.KernelType.SC_SCALAR_SUBCORE,
+        ),
+        grid=(1,),
+        in_specs=[pl.BlockSpec(memory_space=pltpu.HBM)],
+        out_shape=x,
+        out_specs=pl.BlockSpec(memory_space=pltpu.HBM),
+        scratch_shapes=(pltpu.SemaphoreType.DMA,),
+    )
+    def kernel(x_ref, o_hbm_ref, sem):
+      pltpu.async_copy(x_ref, o_hbm_ref, sem).wait()
+
+    np.testing.assert_array_equal(kernel(x), x)
+
 
 class ScalarSubcoreTestWithTCTiling(ScalarSubcoreTest):
   USE_TC_TILING = True
@@ -2008,7 +2033,7 @@ class PipelineTest(PallasSCTest):
   def test_basic(self):
     self.skip_if_tc_tiling()
     num_steps = 16
-    x = jnp.arange(num_steps * self.num_lanes).reshape(-1, self.num_lanes)
+    x = jnp.arange(num_steps * 8).reshape(-1, 8)
 
     @self.vector_subcore_kernel(
         out_shape=x,
@@ -2019,8 +2044,8 @@ class PipelineTest(PallasSCTest):
       @functools.partial(
           pltpu.emit_pipeline,
           grid=(num_steps // 2,),
-          in_specs=pl.BlockSpec((2, self.num_lanes), lambda i: (i, 0)),
-          out_specs=pl.BlockSpec((2, self.num_lanes), lambda i: (i, 0)),
+          in_specs=pl.BlockSpec((2, 8), lambda i: (i, 0)),
+          out_specs=pl.BlockSpec((2, 8), lambda i: (i, 0)),
       )
       def pipeline(x_ref, o_ref):
         o_ref[...] = x_ref[...] + 1

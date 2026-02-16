@@ -311,16 +311,6 @@ def count_primitive_compiles():
     count[0] = dispatch.xla_primitive_callable.cache_info().misses
 
 @contextmanager
-def count_jit_infer_params_cache_miss():
-  assert thread_local_state.infer_params_fun_counts is None
-  counts = collections.Counter()
-  thread_local_state.infer_params_fun_counts = counts
-  try:
-    yield counts
-  finally:
-    thread_local_state.infer_params_fun_counts = None
-
-@contextmanager
 def count_subjaxpr_to_hlo_conversion(fun_name):
   assert thread_local_state.lower_jaxpr_to_fun_counts is None
   counts = collections.Counter()
@@ -498,8 +488,8 @@ def is_device_tpu(version: int | None = None, variant: str = "") -> bool:
   return expected_version in device_kind
 
 def pattern_search(patterns: str | Sequence[str], string: str):
-  if not isinstance(patterns, tuple):
-    patterns = (patterns,)  # type: ignore
+  if isinstance(patterns, str):
+    patterns = (patterns,)
 
   for pattern in patterns:
     if re.search(pattern, string):
@@ -556,6 +546,7 @@ _SMEM_SIZE_BOUND_FOR_TESTS = 99 * 1024
 
 class CudaArchSpecificTest:
   """A mixin with methods allowing to skip arch specific tests."""
+  skipTest: Callable[[str], Any]  # must be provided via inheritance
 
   def skip_unless_sm90a(self):
     if not is_cuda_compute_capability_equal("9.0"):
@@ -596,28 +587,47 @@ def test_device_matches(device_types: Iterable[str]) -> bool:
       return True
   return False
 
-test_device_matches.__test__ = False  # This isn't a test case, pytest.
+test_device_matches.__test__ = False  # This isn't a test case, pytest.  # pyrefly: ignore[missing-attribute]
 
-def _device_filter(predicate):
+def _device_filter(predicate, skip_reason=None):
   def skip(test_method):
     @functools.wraps(test_method)
     def test_method_wrapper(self, *args, **kwargs):
       device_tags = _get_device_tags()
       if not predicate():
-        test_name = getattr(test_method, '__name__', '[unknown test]')
-        raise unittest.SkipTest(
-          f"{test_name} not supported on device with tags {device_tags}.")
+        if skip_reason:
+          raise unittest.SkipTest(skip_reason)
+        else:
+          test_name = getattr(test_method, '__name__', '[unknown test]')
+          raise unittest.SkipTest(
+            f"{test_name} not supported on device with tags {device_tags}.")
       return test_method(self, *args, **kwargs)
     return test_method_wrapper
   return skip
 
-def skip_on_devices(*disabled_devices):
-  """A decorator for test methods to skip the test on certain devices."""
-  return _device_filter(lambda: not test_device_matches(disabled_devices))
+def skip_on_devices(*disabled_devices, skip_reason=None):
+  """A decorator for test methods to skip the test on certain devices.
 
-def run_on_devices(*enabled_devices):
-  """A decorator for test methods to run the test only on certain devices."""
-  return _device_filter(lambda: test_device_matches(enabled_devices))
+  Args:
+    *disabled_devices: Device names that the test should skip on.
+    skip_reason: Optional custom skip message when test is skipped.
+  """
+  if skip_reason is None:
+    skip_reason = "Skipped on devices with tags: " + ", ".join(disabled_devices)
+  return _device_filter(lambda: not test_device_matches(disabled_devices), skip_reason)
+
+def run_on_devices(*enabled_devices, skip_reason=None):
+  """A decorator for test methods to run the test only on certain devices.
+
+  Args:
+    *enabled_devices: Device names that the test should run on.
+    skip_reason: Optional custom skip message when test is skipped.
+  """
+  if skip_reason is None:
+    skip_reason = (
+      "Skipped unless running on devices with tags: " + ", ".join(enabled_devices)
+    )
+  return _device_filter(lambda: test_device_matches(enabled_devices), skip_reason)
 
 def device_supports_buffer_donation():
   """A decorator for test methods to run the test only on devices that support
@@ -798,7 +808,7 @@ def rand_fullrange(rng, standardize_nans=False):
   def gen(shape, dtype, post=lambda x: x):
     dtype = np.dtype(dtype)
     size = dtype.itemsize * math.prod(_dims_of_shape(shape))
-    vals = rng.randint(0, np.iinfo(np.uint8).max, size=size, dtype=np.uint8)
+    vals = rng.randint(0, np.iinfo(np.uint8).max, size=size, dtype=np.uint8)  # pyrefly: ignore[no-matching-overload]  # pyrefly#2398
     vals = post(vals).view(dtype)
     if shape is PYTHON_SCALAR_SHAPE:
       # Sampling from the full range of the largest available uint type
@@ -1393,7 +1403,7 @@ class JaxTestCase(parameterized.TestCase):
   # thread-safe warning utilities. Unlike the unittest versions these only
   # function as context managers.
   @contextmanager
-  def assertWarns(self, warning, *, msg=None):
+  def assertWarns(self, warning, *, msg=None):  # pyrefly: ignore[bad-override]
     with test_warning_util.record_warnings() as ws:
       yield
     for w in ws:
@@ -1406,7 +1416,7 @@ class JaxTestCase(parameterized.TestCase):
               f"{ws}")
 
   @contextmanager
-  def assertWarnsRegex(self, warning, regex):
+  def assertWarnsRegex(self, warning, regex):  # pyrefly: ignore[bad-override]
     if regex is not None and not isinstance(regex, re.Pattern):
         regex = re.compile(regex)
 
@@ -1505,9 +1515,9 @@ class JaxTestCase(parameterized.TestCase):
                        compilation_count())
 
 _PJIT_IMPLEMENTATION = api.jit
-_PJIT_IMPLEMENTATION._name = "jit"
+_PJIT_IMPLEMENTATION._name = "jit"  # pyrefly: ignore[missing-attribute]
 _NOOP_JIT_IMPLEMENTATION = lambda x, *args, **kwargs: x
-_NOOP_JIT_IMPLEMENTATION._name = "noop"
+_NOOP_JIT_IMPLEMENTATION._name = "noop"  # pyrefly: ignore[missing-attribute]
 
 JIT_IMPLEMENTATION = (
   _PJIT_IMPLEMENTATION,
@@ -1543,14 +1553,6 @@ def with_mesh(named_shape: MeshSpec) -> Generator[None, None, None]:
 
 def with_mesh_from_kwargs(f):
   return lambda *args, **kwargs: with_mesh(kwargs['mesh'])(f)(*args, **kwargs)
-
-def with_and_without_mesh(f):
-  return parameterized.named_parameters(
-    {"testcase_name": name, "mesh": mesh, "axis_resources": axis_resources}
-    for name, mesh, axis_resources in (
-      ('', (), ()),
-      ('Mesh', (('x', 2),), (('i', 'x'),))
-    ))(with_mesh_from_kwargs(f))
 
 def with_explicit_mesh(sizes, names, axis_types=None, iota_order=False):
   axis_types = ((mesh_lib.AxisType.Explicit,) * len(names)

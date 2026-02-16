@@ -618,6 +618,8 @@ class Primitive:
   ref_primitive: bool = False
   # set for primitives that can skip canonicalization of values
   skip_canonicalization: bool = False
+  # hook for converting a hijax primitive to a lojax primitive
+  to_lojax: Callable[..., Any] | None = None
 
   is_effectful = None
 
@@ -660,7 +662,6 @@ class Primitive:
       return trace.process_primitive(self, args, params)
     trace.process_primitive(self, args, params)  # may raise lojax error
     raise Exception(f"couldn't apply typeof to args: {args}")
-
 
   def def_impl(self, impl):
     self.impl = impl
@@ -750,7 +751,7 @@ def eval_jaxpr(jaxpr: Jaxpr, consts, *args, propagate_source_info=True) -> list[
     else:
       write(eqn.outvars[0], ans)
     clean_up_dead_vars(eqn, env, lu)
-  return map(read, jaxpr.outvars)
+  return map(read, jaxpr.outvars)  # pyrefly: ignore[bad-return]  # pyrefly#2385
 
 def check_avals_context_mesh(avals, prim_name):
   cur_mesh = mesh_lib.get_abstract_mesh()
@@ -1665,8 +1666,14 @@ def definitely_equal(x, y):
 
 class AbstractValue:
   __slots__: list[str] = []
-  is_high = False
-  has_qdd = False
+
+  @property
+  def is_high(self) -> bool:
+    return False
+
+  @property
+  def has_qdd(self) -> bool:
+    return False
 
   def to_tangent_aval(self):
     raise NotImplementedError("must override")
@@ -2287,6 +2294,12 @@ class ShapedArray(AbstractValue):
         self.shape, dtype, self.weak_type, sharding=sharding, vma=self.vma,
         memory_space=self.memory_space)
 
+  def dec_rank(self, size, spec):
+    return mapped_aval(size, spec, self)
+
+  def inc_rank(self, size, spec):
+    return unmapped_aval(size, spec, self)
+
   def str_short(self, short_dtypes=False, mesh_axis_types=False):
     return str_short_aval(
         self.shape, self.dtype, self.sharding.mesh, self.sharding.spec,
@@ -2710,6 +2723,13 @@ pytype_aval_mappings[Token] = lambda _: abstract_token
 dtypes.canonicalize_value_handlers[Token] = lambda x: x
 
 
+class AbstractTodo(AbstractValue):
+  def __init__(self, inner_aval):
+    self.inner_aval = inner_aval
+
+  def str_short(self, short_dtypes=False, mesh_axis_types=False) -> str:
+    return f'Todo{{{self.inner_aval.str_short(True)}}}'
+
 ### Operations on shapes and dimension sizes.
 
 class InconclusiveDimensionOperation(Exception):
@@ -3030,16 +3050,22 @@ class MapPrimitive(Primitive):
     new_params['out_axes_thunk'] = HashableFunction(lambda: axes, closure=axes)
     return [subfun], new_params
 
-def mapped_aval(size: AxisSize, axis: int | None,
-                aval: AbstractValue) -> AbstractValue:
+def mapped_aval(size: AxisSize, axis, aval: AbstractValue) -> AbstractValue:
+  from jax._src.hijax import HiType  # type: ignore
+  if isinstance(aval, HiType):
+    return aval.dec_rank(size, axis)  # type: ignore
   handler, _ = aval_mapping_handlers.get(type(aval), (None, None))
   if handler is not None:
     return handler(size, axis, aval)
   else:
     raise TypeError(f"no mapping handler for {aval} of type {type(aval)}")
 
+# TODO(yashkatariya): take axis data
 def unmapped_aval(size: AxisSize, axis: int | None,
                   aval: AbstractValue, explicit_mesh_axis=None) -> AbstractValue:
+  from jax._src.hijax import HiType  # type: ignore
+  if isinstance(aval, HiType):
+    return aval.inc_rank(size, axis)  # type: ignore
   _, handler = aval_mapping_handlers.get(type(aval), (None, None))
   if handler is not None:
     return handler(size, axis, explicit_mesh_axis, aval)
@@ -3129,9 +3155,6 @@ def remove_named_axis_effects(
   if not names or not jaxpr.effects:
     return jaxpr
   return jaxpr.replace(effects=filter_named_axis_effects(jaxpr.effects, names))
-
-def used_axis_names_jaxpr(jaxpr: Jaxpr | ClosedJaxpr):
-  return {e.name for e in jaxpr.effects if isinstance(e, NamedAxisEffect)}
 
 def replace_jaxpr_effects(jaxpr: ClosedJaxpr, effects: Effects):
   return _replace_jaxpr_effects(jaxpr, frozenset(effects))
@@ -3849,26 +3872,6 @@ def pp_eqns(eqns: Sequence[JaxprEqn],
     pp.brk("; "),
     [pp_eqn(e, context, settings) for e in eqns])
 
-def _compact_eqn_should_include(k: str, v: Any) -> bool:
-  if k == 'branches': return False
-  if isinstance(v, (Jaxpr, ClosedJaxpr)): return False
-  if (isinstance(v, tuple) and
-      any(isinstance(e, (Jaxpr, ClosedJaxpr)) for e in v)):
-    return False
-  return True
-
-def str_eqn_compact(primitive: Primitive, params: dict[Any, Any]) -> str:
-  "Compact equation to string conversion used in HLO metadata."
-  if primitive in custom_str_eqn_compact_rules:
-    return custom_str_eqn_compact_rules[primitive](primitive, params)
-  primitive_name = primitive.name
-  kvs = " ".join(f"{k}={v}" for k, v in params.items()
-                 if _compact_eqn_should_include(k, v))
-  return f"{primitive_name}[{kvs}]" if len(kvs) > 0 else primitive_name
-custom_str_eqn_compact_rules: dict[
-    Primitive, Callable[[Primitive, dict[Any, Any]], str]
-] = {}
-
 def pp_jaxpr_skeleton(jaxpr: Jaxpr, eqns_fn, context: JaxprPpContext,
                       settings: JaxprPpSettings) -> pp.Doc:
   constvars = pp_vars(jaxpr.constvars, context, print_shapes=settings.print_shapes)
@@ -3933,7 +3936,7 @@ def pp_jaxprs(jaxprs: Sequence[ClosedJaxpr | Jaxpr],
   jaxprs = [j.jaxpr if isinstance(j, ClosedJaxpr) else j for j in jaxprs]
   return pp.group(pp.concat([pp.nest(2, pp.concat([
       pp.text('('), pp.brk(""),
-      pp.join(pp.brk(), map(lambda x: pp_jaxpr(x, context, settings), jaxprs))]
+      pp.join(pp.brk(), map(lambda x: pp_jaxpr(x, context, settings), jaxprs))]  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
     )), pp.brk(""), pp.text(')')])
   )
 

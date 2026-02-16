@@ -52,6 +52,7 @@ FromEltHandler = Callable[[Callable, AxisSize, Elt, MapSpec], Vmappable]
 MakeIotaHandler = Callable[[AxisSize], Array]
 
 def to_elt(trace: Trace, get_idx: GetIdx, x: Vmappable, spec: MapSpec) -> Elt:
+  from jax._src import hijax  # type: ignore
   handler = to_elt_handlers.get(type(x))
   if handler:
     return handler(partial(to_elt, trace, get_idx), get_idx, x, spec)
@@ -59,9 +60,10 @@ def to_elt(trace: Trace, get_idx: GetIdx, x: Vmappable, spec: MapSpec) -> Elt:
     spec = spec and canonicalize_axis(spec, len(np.shape(x)))
     return (BatchTracer(trace, x, spec, source_info_util.current())
             if spec is not None else x)
+  elif isinstance(typeof(x), hijax.HiType):
+    # TODO check possible errors
+    return BatchTracer(trace, x, spec, source_info_util.current())
   else:
-    # TODO(mvoz): This is a terrible place to fall into if you pass
-    # a non jumble type in, make it clearer what went wrong.
     assert False, f'Unexpected type in ELT? {type(x)}'
 
 
@@ -77,8 +79,8 @@ def from_elt(trace: BatchTrace, axis_size: AxisSize, mesh_axis: MeshAxis,
   val, bdim = trace.to_batch_info(x)
   bdim_inferred = bdim if spec is infer else spec
   try:
-    return matchaxis(trace.axis_data.name, axis_size, mesh_axis,
-                     bdim, spec, val, sum_match=sum_match), bdim_inferred
+    return matchaxis2(trace.axis_data, bdim, spec, val,
+                      sum_match=sum_match), bdim_inferred
   except SpecMatchError:
     raise SpecMatchError(i, x.batch_dim, spec) from None
 from_elt_handlers: dict[type, FromEltHandler] = {}
@@ -106,15 +108,7 @@ vmappables: dict[type, tuple[type, type]] = {}
 spec_types: set[type] = set()
 
 def unregister_vmappable(data_type: type) -> None:
-  _, axis_size_type = vmappables.pop(data_type)
-  del to_elt_handlers[data_type]
-  del from_elt_handlers[data_type]
-  if axis_size_type in make_iota_handlers:
-    del make_iota_handlers[axis_size_type]
-  global spec_types
-  spec_types = (
-      set() | {spec_type for spec_type, _ in vmappables.values()}
-  )
+  pass  # this used to do cleanup, but it was dumb
 
 def is_vmappable(x: Any) -> bool:
   return type(x) in vmappables
@@ -142,7 +136,7 @@ class BatchTracer(Tracer):
   def __init__(self, trace, val, batch_dim: NotMapped | int,
                source_info: source_info_util.SourceInfo | None = None):
     if config.enable_checks.value:
-      assert type(batch_dim) in (NotMapped, int)
+      # assert type(batch_dim) in (NotMapped, int)
       if type(batch_dim) is int:
         aval = core.get_aval(val)
         assert 0 <= batch_dim < len(aval.shape)
@@ -156,6 +150,7 @@ class BatchTracer(Tracer):
 
   @property
   def aval(self):
+    from jax._src import hijax  # type: ignore
     aval = core.get_aval(self.val)
     if self._trace.axis_data.spmd_name is not None:
       if config._check_vma.value:
@@ -165,6 +160,8 @@ class BatchTracer(Tracer):
       return aval
     elif type(self.batch_dim) is int:
       return core.mapped_aval(aval.shape[self.batch_dim], self.batch_dim, aval)
+    elif isinstance(aval, hijax.HiType):
+      return aval.dec_rank(self._trace.axis_data.size, self.batch_dim)
     else:
       raise Exception("batch dim should be int or `not_mapped`")
 
@@ -375,7 +372,7 @@ def _batch_inner(f: Callable, axis_data, out_dim_dests, sum_match, tag, in_dims,
     idx = memoize(lambda: BatchTracer(trace, make_iota(axis_data.size), 0,
                                       source_info_util.current()))
     with core.set_current_trace(parent_trace):
-      in_tracers = map(partial(to_elt, trace, idx), in_vals, in_dims)
+      in_tracers = map(partial(to_elt, trace, idx), in_vals, in_dims)  # pyrefly: ignore[no-matching-overload]  # pyrefly#2385
     # TODO(yashkatariya): Instead of `add_explicit_mesh_axis_names`, we should
     # create a new mesh by removing the axis_data.explicit_mesh_axis from it.
     with (core.set_current_trace(trace),
@@ -385,7 +382,7 @@ def _batch_inner(f: Callable, axis_data, out_dim_dests, sum_match, tag, in_dims,
       outs = f(*in_tracers)
       out_dim_dests = out_dim_dests() if callable(out_dim_dests) else out_dim_dests
       out_vals, out_dim_srcs = unzip2(
-          map(partial(from_elt, trace, axis_data.size, axis_data.explicit_mesh_axis, sum_match),
+          map(partial(from_elt, trace, axis_data.size, axis_data.explicit_mesh_axis, sum_match),  # pyrefly: ignore[no-matching-overload]  # pyrefly#2385
               range(len(outs)), outs, out_dim_dests))
   return out_vals, out_dim_srcs, trace
 
@@ -430,7 +427,7 @@ def batch_subtrace(f, store, tag, axis_data, in_dims, *in_vals):
     with core.set_current_trace(trace):
       in_dims = in_dims() if callable(in_dims) else in_dims
       in_tracers = [BatchTracer(trace, x, dim, source_info_util.current())
-                    if dim is not None else x for x, dim in zip(in_vals, in_dims)]
+                    if dim is not None else x for x, dim in zip(in_vals, in_dims)]  # pyrefly: ignore[no-matching-overload]  # pyrefly#2385
       outs = f(*in_tracers)
     out_vals, out_dims = unzip2(map(trace.to_batch_info, outs))
   store.store(out_dims)
@@ -541,7 +538,7 @@ def _match_axes_jaxpr(f, store, axis_data, out_axes_dest, out_axes, trace, in_ax
 def _batch_jaxpr_outer(f, axis_data, in_dims, *in_vals):
   in_dims = in_dims() if callable(in_dims) else in_dims
   in_dims = [canonicalize_axis(ax, np.ndim(x)) if isinstance(ax, int)
-             else ax for x, ax in unsafe_zip(in_vals, in_dims)]
+             else ax for x, ax in unsafe_zip(in_vals, in_dims)]  # pyrefly: ignore[no-matching-overload]  # pyrefly#2385
   tag = TraceTag()
   return f(tag, in_dims, *in_vals)
 
@@ -581,7 +578,7 @@ def batch_custom_jvp_subtrace(f, store, tag, axis_data, in_dims, *in_vals):
   out_tangents = map(partial(_matchaxis_symzeros, trace.axis_data.name, size, mesh_axis),
                      out_tangent_bds, out_dims, out_tangents)
   store.store(out_dims)
-  return out_primals + out_tangents
+  return out_primals + out_tangents  # pyrefly: ignore[unsupported-operation]  # pyrefly#2385
 
 def batch_custom_vjp_bwd(bwd: lu.WrappedFun, tag: core.TraceTag,
                          axis_data: AxisData,
@@ -767,6 +764,7 @@ def matchaxis2(axis_data, src, dst, x, sum_match=False):
   return matchaxis(axis_data.name, axis_data.size, axis_data.explicit_mesh_axis,
                    src, dst, x, sum_match)
 
+# TODO(yashkatariya): remove this, inline into matchaxis2
 def matchaxis(axis_name, sz, mesh_axis, src, dst, x, sum_match=False):
   try:
     _ = core.get_aval(x)

@@ -254,12 +254,11 @@ class ShardMapTest(jtu.JaxTestCase):
   def test_matmul_unreduced_error(self, mesh):
     np_inp1 = np.arange(8.).reshape(2, 4)
     np_inp2 = np.arange(8.).reshape(4, 2)
-    arr1 = jax.device_put(np_inp1, P('x', 'y'))
-    arr2 = jax.device_put(np_inp2, P('y', None))
+    arr1 = jax.device_put(np_inp1, P('x', None))
+    arr2 = jax.device_put(np_inp2, P(None, None))
 
     @jax.jit
-    @shard_map(in_specs=(P('x', None), P(None, None)),
-               out_specs=P('x', None, unreduced={'y'}))
+    @shard_map(out_specs=P('x', None, unreduced={'y'}))
     def f(a, b):
       c = jnp.einsum('ab,bc->ac', a, b)
       self.assertEqual(c.aval.vma, {'x'})
@@ -1415,7 +1414,7 @@ class ShardMapTest(jtu.JaxTestCase):
       spec = jax.ShapeDtypeStruct(x_shard.shape, x_shard.dtype)
       return jax.pure_callback(host_kernel, (spec, spec), x_shard)
 
-    x = np.arange(32, dtype=np.float32).reshape(16, 2)
+    x = jax.device_put(np.arange(32, dtype=np.float32).reshape(16, 2), P('x'))
     per_shard(x)  # doesn't crash
 
   def test_psum_transpose_non_zero_cts(self):
@@ -1537,7 +1536,7 @@ class ShardMapTest(jtu.JaxTestCase):
 
     with self.assertRaisesRegex(
         ValueError,
-        r".*out_specs is PartitionSpec\('x',\) which implies that the.*"
+        r".*out_specs is P\('x',\) which implies that the.*"
         r' output value is only varying across mesh axes \{x\} and not \{y,z\},'
         r' but it was inferred to be possibly varying over \{x,y,z\}.*'):
       f(np.arange(16).reshape(4, 2, 2))
@@ -2530,8 +2529,8 @@ class ShardMapTest(jtu.JaxTestCase):
   @jtu.with_explicit_mesh((2,), 'x')
   def test_jacrev_explicit(self, mesh):
     B, N, H = 20, 6, 8
-    w = jnp.arange(N * H).reshape(N, H).astype(jnp.float32)
-    x = jnp.arange(B * N).reshape(B, N).astype(jnp.float32)
+    w = jax.device_put(jnp.arange(N * H).reshape(N, H).astype(jnp.float32), P())
+    x = jax.device_put(jnp.arange(B * N).reshape(B, N).astype(jnp.float32), P('x'))
 
     def f(w, x):
       return jnp.sum(x @ w, axis=-1)
@@ -2546,8 +2545,9 @@ class ShardMapTest(jtu.JaxTestCase):
   @jtu.with_explicit_mesh((2, 2), ('x', 'y'))
   def test_jacrev_explicit_complex(self, mesh):
     B, N, H = 20, 6, 8
-    w = jnp.arange(N * H).reshape(N, H).astype(jnp.float32)
-    x = jnp.arange(B * N).reshape(B, N).astype(jnp.float32)
+    w = jax.device_put(np.arange(N * H).reshape(N, H).astype(jnp.float32), P())
+    x = jax.device_put(jnp.arange(B * N).reshape(B, N).astype(jnp.float32), P('x'))
+    y = jax.device_put(jnp.arange(B * N).reshape(B, N).astype(jnp.float32), P('y'))
 
     def f(w, xs):
       return jax.tree.map(lambda z: jnp.sum(z @ w, axis=-1), xs)
@@ -2563,14 +2563,15 @@ class ShardMapTest(jtu.JaxTestCase):
       self.assertEqual(ret[1][1].aval.vma, {'y'})
       return ret[0][0], ret[0][1], ret[1][0], ret[1][1]
 
-    f_jac_sharded(w, x, x)  # doesn't crash
+    f_jac_sharded(w, x, y)  # doesn't crash
 
   @jtu.with_explicit_mesh((2,), 'x')
   def test_random_choice_pvary(self, mesh):
     B, C = 8, 3
     key = jax.random.key(0)
-    keys = jax.random.split(key, B)
-    hoppable_clusters = jax.random.randint(key, (B, C), minval=0, maxval=2) == 1
+    keys = jax.device_put(jax.random.split(key, B), P('x'))
+    hoppable_clusters = jax.device_put(
+        jax.random.randint(key, (B, C), minval=0, maxval=2) == 1, P('x'))
 
     @jax.vmap
     def _update_samples(key, hoppable_clusters):
@@ -3133,7 +3134,7 @@ class ShardMapTest(jtu.JaxTestCase):
       return jnp.sum(w * x, axis=-1)
 
     w = jnp.ones((2, 4), dtype=np.float32)
-    x = jnp.ones((4, 4), dtype=np.float32)
+    x = jax.device_put(jnp.ones((4, 4), dtype=np.float32), P('x'))
 
     shard_map(simple_func, in_specs=(P(), P('x')), out_specs=P('x'))(w, x)
 
@@ -3147,7 +3148,8 @@ class ShardMapTest(jtu.JaxTestCase):
   def test_close_over_input_explict_ctx_mesh(self):
     mesh = jtu.create_mesh((2,), 'x', axis_types=(AxisType.Explicit,))
     w = jnp.ones((2, 4), dtype=np.float32)
-    x = jnp.ones((4, 4), dtype=np.float32)
+    x = jax.device_put(jnp.ones((4, 4), dtype=np.float32),
+                       NamedSharding(mesh, P('x')))
 
     def simple_func(w, x):
       return jnp.sum(w * x, axis=-1)
@@ -3809,6 +3811,7 @@ class ShardMapTest(jtu.JaxTestCase):
     def g(x):
       self.assertEqual(x.aval.vma, frozenset())
       self.assertEqual(x.aval.sharding.spec, P(None))
+      x = jax.reshard(x, P('y'))
       if use_axis_name:
         out = jax.shard_map(jnp.cos, in_specs=P('y'), out_specs=P('y'),
                             axis_names={'y'})(x)
@@ -4143,7 +4146,7 @@ class ShardMapTest(jtu.JaxTestCase):
 
   @jtu.with_explicit_mesh((2,), ('data',))
   def test_jnp_histogram(self, mesh):
-    x = jnp.arange(8 * 4 * 2).reshape(8, 4, 2)
+    x = jax.device_put(np.arange(8 * 4 * 2).reshape(8, 4, 2), P('data'))
 
     def f(x, bin_edges):
       hist, _ = jax.vmap(lambda q: jnp.histogram(q, bins=bin_edges))(x)
@@ -4777,7 +4780,7 @@ class ShardMapTest(jtu.JaxTestCase):
     arr = jax.device_put(np.arange(8.), P('x'))
 
     @jax.jit
-    @jax.shard_map(in_specs=P(), out_specs=P('x'))
+    @jax.shard_map(in_specs=P('x'), out_specs=P('x'))
     def f(x):
       return x * 2
 
@@ -4824,31 +4827,19 @@ class ShardMapTest(jtu.JaxTestCase):
     x = jax.device_put(jnp.arange(8.), jax.P('x'))
     jax.grad(lambda x: f(x).sum())(x)  # don't crash
 
-  @jtu.with_explicit_mesh((2,), 'x')
+  @jtu.with_explicit_mesh((2, 2), ('x', 'y'))
   def test_vmap_shmap_psum(self, mesh):
-    arr = jnp.arange(16).reshape(2, 8)
+    arr = jax.device_put(jnp.arange(16).reshape(2, 8), P('x', 'y'))
 
-    @jax.shard_map(in_specs=P("x"), out_specs=P(None))
+    @jax.shard_map(in_specs=P('y'), out_specs=P(None))
     def f(x):
-      return jax.lax.psum(x, axis_name='x')
+      return jax.lax.psum(x, axis_name='y')
 
-    f(arr)  # doesn't crash
-    jax.vmap(f)(arr)  # doesn't crash
+    out = jax.vmap(f)(arr)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
 
-    jax.jit(f)(arr)  # doesn't crash
-    jax.jit(jax.vmap(f))(arr)  # doesn't crash
-
-  @jtu.with_explicit_mesh((2,), 'x')
-  def test_subclass_partition_spec_error_message(self, mesh):
-    class MyP(jax.P):
-      pass
-
-    @jax.shard_map(in_specs=(jax.P("x"), MyP("x"),), out_specs=())
-    def f(x, y):
-      return ()
-
-    with self.assertRaisesRegex(ValueError, 'not evenly divisible'):
-      f(jnp.arange(8.), jnp.arange(9.))
+    out = jax.jit(jax.vmap(f))(arr)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
 
   def test_shmap_empty_mesh_error(self):
     mesh = empty_concrete_mesh
@@ -4904,8 +4895,9 @@ class ShardMapTest(jtu.JaxTestCase):
     with self.assertRaisesRegex(
         NotImplementedError,
         "Eager shard_map with unreduced/reduced is not implemented"):
+      arr2 = jax.device_put(np.arange(8), P('x'))
       jax.shard_map(lambda x: jax.lax.pcast(x, 'x', to='unreduced'),
-                    in_specs=P('x'), out_specs=P(unreduced={'x'}))(np.arange(8))
+                    out_specs=P(unreduced={'x'}))(arr2)
 
     with self.assertRaisesRegex(
         NotImplementedError,
@@ -5050,6 +5042,26 @@ class ShardMapTest(jtu.JaxTestCase):
 
     with self.assertRaisesRegex(NameError, "Found an unbound axis name"):
       f(np.arange(8))
+
+  @parameterized.parameters(AxisType.Auto, AxisType.Explicit)
+  def test_slice_oob_shmap(self, axis_type):
+    mesh = jtu.create_mesh((2,), 'x', axis_types=(axis_type,))
+    with jax.set_mesh(mesh):
+      arr = jax.device_put(jnp.ones((32, 32)), P(None, 'x'))
+
+      def f(x):
+        return x[:, 100:116]
+
+      out = jax.jit(jax.shard_map(f, in_specs=P(None, 'x'),
+                                  out_specs=P(None, 'x')))(arr)
+      self.assertEqual(out.shape, (32, 0))
+      if axis_type == (AxisType.Explicit,):
+        self.assertEqual(out.sharding, NamedSharding(mesh, P(None, 'x')))
+
+      out = jax.jit(f)(arr)
+      self.assertEqual(out.shape, (32, 0))
+      if axis_type == (AxisType.Explicit,):
+        self.assertEqual(out.sharding, NamedSharding(mesh, P(None, 'x')))
 
 
 class FunSpec(NamedTuple):

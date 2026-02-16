@@ -1979,7 +1979,7 @@ def concatenate(operands: Array | Sequence[ArrayLike], dimension: int) -> Array:
   return concatenate_p.bind(*operands, dimension=dimension)
 
 
-def split(operand: ArrayLike, sizes: Sequence[int],
+def split(operand: ArrayLike, sizes: Sequence[DimSize],
           axis: int = 0) -> Sequence[Array]:
   """Splits an array along ``axis``.
 
@@ -3349,10 +3349,6 @@ def top_k(operand: ArrayLike, k: int, *, axis: int = -1) -> tuple[Array, Array]:
   axis = canonicalize_axis(axis, np.ndim(operand))
   return top_k_p.bind(operand, k=k, axis=axis)
 
-def tie_in(x: Any, y: T) -> T:
-  """Deprecated. Ignores ``x`` and returns ``y``."""
-  return y
-
 def full(shape: Shape, fill_value: ArrayLike, dtype: DTypeLike | None = None, *,
          sharding: Sharding | None = None) -> Array:
   """Returns an array of `shape` filled with `fill_value`.
@@ -3443,7 +3439,7 @@ def _eye(dtype: DTypeLike, shape: Shape, offset: DimSize = 0) -> Array:
 
 def _delta(dtype: DTypeLike, shape: Shape, axes: Sequence[int]) -> Array:
   """This utility function exists for creating Kronecker delta arrays."""
-  axes = map(int, axes)
+  axes = map(int, axes)  # pyrefly: ignore[bad-assignment]  # pyrefly#2385
   dtype = dtypes.check_and_canonicalize_user_dtype(dtype, "delta")
   base_shape = tuple(np.take(shape, axes))
   iotas = [broadcasted_iota(np.uint32, base_shape, i)
@@ -4109,29 +4105,6 @@ def _maybe_broadcast(target_shape, x, target_sharding):
     return broadcast_in_dim(reshape(x, squeeze_shape), target_shape, dims,
                             out_sharding=target_sharding)
 
-def broadcast_hlo(
-    aval_out: core.ShapedArray, avals: Sequence[core.ShapedArray],
-    args: Sequence[ir.Value]) -> Sequence[ir.Value]:
-  """Broadcasts HLO values with broadcast-compatible shapes to the same shape.
-  """
-  out = []
-  for aval, arg in zip(avals, args):
-    if aval.shape != aval_out.shape:
-      assert len(aval.shape) <= len(aval_out.shape), (aval, aval_out)
-      dims = mlir.dense_int_array(
-          list(range(len(aval_out.shape) - len(aval.shape), len(aval_out.shape))))
-      if any(isinstance(d, ir.Value) for d in aval_out.shape):
-        arg = hlo.dynamic_broadcast_in_dim(
-            mlir.aval_to_ir_type(aval_out), arg,
-            mlir.shape_tensor(aval_out.shape), dims)
-      else:
-        arg = hlo.broadcast_in_dim(
-            mlir.aval_to_ir_type(aval.update(shape=aval_out.shape)), arg,
-            dims)
-    out.append(arg)
-  return out
-
-
 def _nary_lower_hlo(
     op: Callable, ctx, *args: ir.Value, accuracy=None, **params
 ) -> Sequence[ir.Value]:
@@ -4361,9 +4334,6 @@ mlir.register_lowering(asin_p, partial(_nary_lower_hlo, chlo.asin))
 acos_p = standard_unop(_float | _complex, 'acos')
 ad.defjvp(acos_p, lambda g, x: mul(g, neg(rsqrt(sub(_const(x, 1), square(x))))))
 mlir.register_lowering(acos_p, partial(_nary_lower_hlo, chlo.acos))
-
-def atan_impl(x):
-  return atan2(x, _const(x, 1))
 
 atan_p = standard_unop(_float | _complex, 'atan')
 ad.defjvp(atan_p, lambda g, x: div(g, add(_const(x, 1), square(x))))
@@ -6113,7 +6083,7 @@ def _ragged_dot_general_transpose_rule(
             np.take(x_contract, np.argsort(y_contract))
         )
         unsorted_axes = list(x_batch) + x_kept + x_contract_sorted_by_y
-      case RaggedDotMode.RAGGED_CONTRACTING | RaggedDotMode.RAGGED_BATCH:
+      case RaggedDotMode.RAGGED_CONTRACTING | RaggedDotMode.RAGGED_BATCH | _:
         raise unimplemented('grad_x_dims', mode)
     return dims, unsorted_axes  # pytype: disable=name-error
 
@@ -6132,7 +6102,7 @@ def _ragged_dot_general_transpose_rule(
         unsorted_axes = (
             list(y_group) + list(y_batch) + y_contract_sorted_by_x + y_kept
         )
-      case RaggedDotMode.RAGGED_CONTRACTING | RaggedDotMode.RAGGED_BATCH:
+      case RaggedDotMode.RAGGED_CONTRACTING | RaggedDotMode.RAGGED_BATCH | _:
         raise unimplemented('grad_y_dims', mode)
     return dims, unsorted_axes  # pytype: disable=name-error
 
@@ -7767,7 +7737,8 @@ def _reduce_sum_reduced_rule(out_s, operand, *, axes, **_):
 def _reduce_sum_dtype_rule(operand, *, axes, **_):
   dt = _reduce_number_dtype_rule('reduce_sum', operand)
   if (operand.dtype in [np.float16, dtypes.bfloat16] and
-      not config.allow_f16_reductions.value):
+      not config.allow_f16_reductions.value and
+      not all(core.definitely_equal(operand.shape[d], 1) for d in axes)):
     raise ValueError(f"reduce_sum on operand {operand.str_short(True)} is not "
                      "allowed when jax_allow_f16_reductions=False.")
   return dt
@@ -9080,7 +9051,7 @@ def _optimization_barrier_lowering_rule(ctx, *args):
   barrier_types = map(mlir.aval_to_ir_type, ctx.avals_in)
   flat_args = mlir.flatten_ir_values(args)
   barrier_op = hlo.OptimizationBarrierOp(flat_args)
-  return mlir.unflatten_ir_values_like_types(barrier_op.results, barrier_types)
+  return mlir.unflatten_ir_values_like_types(barrier_op.results, barrier_types)  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
 
 
 optimization_barrier_p = core.Primitive('optimization_barrier')

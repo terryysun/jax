@@ -210,7 +210,12 @@ def scan(f: Callable[[Carry, X], tuple[Carry, Y]],
   args_avals = args.map(core.get_aval)
   init_avals, xs_avals = args_avals.unpack()
 
-  length = _infer_scan_length(list(xs), list(xs_avals), length)
+  from jax._src.hijax import HiType  # type: ignore
+  if any(isinstance(a, HiType) for a in xs_avals):
+    if length is None:
+      raise ValueError("must provide `length` to `scan`")
+  else:
+    length = _infer_scan_length(list(xs), list(xs_avals), length)
 
   if config.disable_jit.value:
     if length == 0:
@@ -1061,10 +1066,6 @@ def _scan_batching_rule(axis_data, args,
   carry_bdims = [0 if b else batching.not_mapped for b in carry_batched]
   ys_bdims = [1 if b else batching.not_mapped for b in ys_batched]
   return outs, carry_bdims + ys_bdims
-
-@weakref_lru_cache
-def _cached_scan_pad_jaxpr(jaxpr):
-  return ClosedJaxpr(*pe.pad_jaxpr(jaxpr.jaxpr, jaxpr.consts))
 
 def _scan_dce_rule(used_outputs: list[bool], eqn: core.JaxprEqn
                    ) -> tuple[list[bool], core.JaxprEqn | None]:
@@ -2301,7 +2302,9 @@ def _fori_body_fun(body_fun: Callable, body_fun_dbg: core.DebugInfo) -> Callable
 
   def while_body_fun(loop_carry):
     i, upper, x = loop_carry
-    return lax.add(i, lax._const(i, 1)), upper, body_fun_ref()(i, x)
+    body_fun = body_fun_ref()
+    assert body_fun is not None
+    return lax.add(i, lax._const(i, 1)), upper, body_fun(i, x)
   if body_fun_dbg.arg_names is not None:
     arg_names = (body_fun_dbg.arg_names[0],
                  "",  # upper,
@@ -2318,7 +2321,9 @@ def _fori_scan_body_fun(body_fun: Callable, body_fun_dbg: core.DebugInfo) -> Cal
   body_fun_ref = weakref.ref(body_fun)
   def scanned_fun(loop_carry, _):
     i, x = loop_carry
-    return (i + 1, body_fun_ref()(i, x)), None
+    body_fun = body_fun_ref()
+    assert body_fun is not None
+    return (i + 1, body_fun(i, x)), None
   api_util.save_wrapped_fun_debug_info(
       scanned_fun, body_fun_dbg._replace(result_paths=None))
   return scanned_fun
@@ -2801,22 +2806,6 @@ def cumred_reduce_window_impl(window_reduce: Callable, x, *, axis: int,
   window_dims = [1] * x.ndim
   window_dims[axis] = n
   return window_reduce(x, window_dims, strides, padding)
-
-
-def cumred_gpu_impl(window_reduce: Callable, reduce_fn: Callable, x, *,
-                    axis: int, reverse: bool):
-  # On GPU, reduce_window is executed in a single fusion and associative_scan
-  # is split into multiple to materialize intermediate calculations.
-  # On small inputs reduce_window is faster being a single fusion,
-  # but on larger ones is slower because of O(n^2) complexity.
-  # This conservative value of the threshold was obtained via benchmarking.
-  if not core.is_constant_dim(x.shape[axis]):
-    raise NotImplementedError(
-        "associative scan reductions not implemented with shape polymorphism "
-        "and native serialization on GPU")
-  if x.shape[axis] > 32:
-    return associative_scan(reduce_fn, x, reverse=reverse, axis=axis)
-  return cumred_reduce_window_impl(window_reduce, x, axis=axis, reverse=reverse)
 
 
 def _cumred_batch_rule(prim, batched_args, batch_dims, *, axis: int,

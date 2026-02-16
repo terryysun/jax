@@ -48,6 +48,8 @@ def is_nvshmem_used():
 class TestCase(jt_multiprocess.MultiProcessTest if is_nvshmem_used() is None else parameterized.TestCase):
 
   def setUp(self):
+    if jtu.test_device_matches(["rocm"]):
+      self.skipTest("Mosaic not supported on ROCm currently.")
     # TODO(b/482756208): Fix this
     if jax.local_device_count() > 1:
       self.skipTest("Collective metadata tests are flaky since right now when "
@@ -458,10 +460,6 @@ class PallasCallRemoteDMATest(TestCase):
   def test_copy_tma(self, use_dict):
     if jax.process_index() > 2:
       return  # Only 2 processes needed.
-
-    # TODO(b/481949311): Remove this once the bug is fixed.
-    if jax.local_device_count() > 1:
-      self.skipTest("b/481949311")
 
     def kernel(y_ref, smem_ref, sem):
       dev_id = lax.axis_index("y")

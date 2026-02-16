@@ -440,11 +440,9 @@ typedef cusolverDnParams_t gpusolverDnParams_t;
 #define JAX_GPU_HAVE_SOLVER_GEEV 0
 #endif  // CUDA_VERSION >= 12060
 
-namespace jax::JAX_GPU_NAMESPACE {
-namespace {
-constexpr uint32_t kNumThreadsPerWarp = 32;
-}
-}  // namespace jax::JAX_GPU_NAMESPACE
+namespace jax::cuda {
+inline constexpr uint32_t kNumThreadsPerWarp = 32;
+}  // namespace jax::cuda
 
 #elif defined(JAX_GPU_HIP)
 
@@ -511,6 +509,8 @@ typedef miopenRNNFWDMode_t gpudnnForwardMode_t;
 typedef hipModule_t gpuModule_t;
 typedef void gpuSyevjInfo;
 typedef hipsolverSyevjInfo_t gpuSyevjInfo_t;
+typedef void gpuGesvdjInfo;
+typedef hipsolverGesvdjInfo_t gpuGesvdjInfo_t;
 typedef hipsolverEigMode_t gpusolverEigMode_t;
 typedef hipsolverStatus_t gpusolverStatus_t;
 typedef hipsparseIndexType_t gpusparseIndexType_t;
@@ -528,11 +528,12 @@ typedef hipsparseDnVecDescr_t gpusparseDnVecDescr_t;
 #define GPU_C_64F HIP_C_64F
 #define GPU_R_64F HIP_R_64F
 
-namespace{
+namespace jax::hip {
 inline hipblasStatus_t gpublasCreate(gpublasHandle_t* handle) {
-    return hipblasCreate(reinterpret_cast<hipblasHandle_t*>(handle));
+  return hipblasCreate(reinterpret_cast<hipblasHandle_t*>(handle));
 }
-}
+}  // namespace jax::hip
+#define gpublasCreate ::jax::hip::gpublasCreate
 #define gpublasSetStream hipblasSetStream
 #define gpublasSgeqrfBatched hipblasSgeqrfBatched
 #define gpublasDgeqrfBatched hipblasDgeqrfBatched
@@ -583,14 +584,17 @@ inline hipblasStatus_t gpublasCreate(gpublasHandle_t* handle) {
 #define GPUDNN_LSTM miopenLSTM
 #define GPUDNN_BIDIRECTIONAL miopenRNNbidirection
 
-namespace{
+namespace jax::hip {
 inline hipsolverStatus_t gpusolverDnCreate(gpusolverDnHandle_t* handle) {
-    return hipsolverCreate(reinterpret_cast<hipsolverHandle_t*>(handle));
+  return hipsolverCreate(reinterpret_cast<hipsolverHandle_t*>(handle));
 }
-}
+}  // namespace jax::hip
+#define gpusolverDnCreate ::jax::hip::gpusolverDnCreate
 #define gpusolverDnSetStream hipsolverSetStream
 #define gpusolverDnCreateSyevjInfo hipsolverCreateSyevjInfo
 #define gpusolverDnDestroySyevjInfo hipsolverDestroySyevjInfo
+#define gpusolverDnCreateGesvdjInfo hipsolverCreateGesvdjInfo
+#define gpusolverDnDestroyGesvdjInfo hipsolverDestroyGesvdjInfo
 #define gpusolverDnSgeqrf hipsolverSgeqrf
 #define gpusolverDnDgeqrf hipsolverDgeqrf
 #define gpusolverDnCgeqrf hipsolverCgeqrf
@@ -667,6 +671,22 @@ inline hipsolverStatus_t gpusolverDnCreate(gpusolverDnHandle_t* handle) {
   hipsolverCgesvd_bufferSize(h, jobu, jobvt, m, n, lwork)
 #define gpusolverDnZgesvd_bufferSize(h, jobu, jobvt, m, n, lwork) \
   hipsolverZgesvd_bufferSize(h, jobu, jobvt, m, n, lwork)
+#define gpusolverDnSgesvdj hipsolverSgesvdj
+#define gpusolverDnDgesvdj hipsolverDgesvdj
+#define gpusolverDnCgesvdj hipsolverCgesvdj
+#define gpusolverDnZgesvdj hipsolverZgesvdj
+#define gpusolverDnSgesvdj_bufferSize hipsolverSgesvdj_bufferSize
+#define gpusolverDnDgesvdj_bufferSize hipsolverDgesvdj_bufferSize
+#define gpusolverDnCgesvdj_bufferSize hipsolverCgesvdj_bufferSize
+#define gpusolverDnZgesvdj_bufferSize hipsolverZgesvdj_bufferSize
+#define gpusolverDnSgesvdjBatched hipsolverSgesvdjBatched
+#define gpusolverDnDgesvdjBatched hipsolverDgesvdjBatched
+#define gpusolverDnCgesvdjBatched hipsolverCgesvdjBatched
+#define gpusolverDnZgesvdjBatched hipsolverZgesvdjBatched
+#define gpusolverDnSgesvdjBatched_bufferSize hipsolverSgesvdjBatched_bufferSize
+#define gpusolverDnDgesvdjBatched_bufferSize hipsolverDgesvdjBatched_bufferSize
+#define gpusolverDnCgesvdjBatched_bufferSize hipsolverCgesvdjBatched_bufferSize
+#define gpusolverDnZgesvdjBatched_bufferSize hipsolverZgesvdjBatched_bufferSize
 #define gpusolverDnSsytrd_bufferSize hipsolverDnSsytrd_bufferSize
 #define gpusolverDnDsytrd_bufferSize hipsolverDnDsytrd_bufferSize
 #define gpusolverDnChetrd_bufferSize hipsolverDnChetrd_bufferSize
@@ -687,11 +707,12 @@ inline hipsolverStatus_t gpusolverDnCreate(gpusolverDnHandle_t* handle) {
 #define GPUBLAS_OP_C HIPBLAS_OP_C
 
 #define gpusparseCooSetStridedBatch hipsparseCooSetStridedBatch
-namespace{
+namespace jax::hip {
 inline hipsparseStatus_t gpusparseCreate(gpusparseHandle_t* handle) {
-    return hipsparseCreate(reinterpret_cast<hipsparseHandle_t*>(handle));
+  return hipsparseCreate(reinterpret_cast<hipsparseHandle_t*>(handle));
 }
-}
+}  // namespace jax::hip
+#define gpusparseCreate ::jax::hip::gpusparseCreate
 #define gpusparseSetStream hipsparseSetStream
 #define gpusparseCreateCoo hipsparseCreateCoo
 #define gpusparseCreateCsr hipsparseCreateCsr
@@ -810,11 +831,9 @@ inline hipsparseStatus_t gpusparseCreate(gpusparseHandle_t* handle) {
 
 #define JAX_GPU_HAVE_SOLVER_GEEV 0
 
-namespace jax::JAX_GPU_NAMESPACE {
-namespace {
-constexpr uint32_t kNumThreadsPerWarp = 64;
-}
-}  // namespace jax::JAX_GPU_NAMESPACE
+namespace jax::hip {
+inline constexpr uint32_t kNumThreadsPerWarp = 64;
+}  // namespace jax::hip
 
 #else  // defined(GPU vendor)
 #error "Either JAX_GPU_CUDA or JAX_GPU_HIP must be defined"

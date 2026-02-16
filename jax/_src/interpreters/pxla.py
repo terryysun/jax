@@ -492,7 +492,7 @@ class MapTrace(core.Trace):
     tracers = map(self.to_map_tracer, tracers)
     vals, shard_axes = unzip2([(t.val, t.shard_axes) for t in tracers])
     names = core.get_axis_env().axis_names()
-    all_axes = tuple(_map_schedule(map(s.get, names)) for s in shard_axes)  # pytype: disable=wrong-arg-types  # always-use-return-annotations
+    all_axes = tuple(_map_schedule(map(s.get, names)) for s in shard_axes)  # pytype: disable=wrong-arg-types  # always-use-return-annotations  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
     f_mapped, out_shard_axes = _multi_pmap(f, self.emap_info, names, all_axes)
     with core.eval_context(), api.disable_jit(False):
       outvals = f_mapped(*vals)
@@ -1956,8 +1956,8 @@ def _cached_lowering_to_hlo(closed_jaxpr: core.ClosedJaxpr, module_name, backend
   axis_ctx: mlir.AxisContext
 
   if nreps == 1:
-    in_mlir_shardings = map(_to_logical_sharding, in_avals, in_shardings)
-    out_mlir_shardings = map(_to_logical_sharding, out_avals, out_shardings)
+    in_mlir_shardings = map(_to_logical_sharding, in_avals, in_shardings)  # pyrefly: ignore[bad-assignment]  # pyrefly#2385
+    out_mlir_shardings = map(_to_logical_sharding, out_avals, out_shardings)  # pyrefly: ignore[bad-assignment]  # pyrefly#2385
     replicated_args = [False] * len(in_avals)
     axis_ctx = sharding_impls.ShardingContext(num_devices, device_assignment,
                                               abstract_mesh)
@@ -2920,7 +2920,7 @@ def _maybe_get_and_check_out_shardings(
       orig_hlo_s = orig._to_xla_hlo_sharding(aval.ndim)  # pytype: disable=attribute-error
       # MANUAL HloSharding comes from other partitioning frameworks.
       if (not dtypes.issubdtype(aval.dtype, dtypes.extended) and
-          not xla_hlo_s.is_manual() and
+          not xla_hlo_s.is_manual() and aval.size != 0 and
           (not op_shardings.are_hlo_shardings_equal(xla_hlo_s, orig_hlo_s) or
            xla_s.memory_kind != orig.memory_kind)):  # pytype: disable=attribute-error
         raise AssertionError(
@@ -3173,10 +3173,10 @@ class JitGlobalCppCacheKeys:
             self.donate_argnames is not None or
             self.device is not None or
             self.backend is not None or
-            any(not isinstance(i, UnspecifiedValue) for i in self.in_shardings_leaves) or
-            any(not isinstance(o, UnspecifiedValue) for o in self.out_shardings_leaves) or
-            any(i is not None for i in self.in_layouts_leaves) or
-            any(o is not None for o in self.out_layouts_leaves) or
+            any(not isinstance(i, UnspecifiedValue) for i in (self.in_shardings_leaves or [])) or
+            any(not isinstance(o, UnspecifiedValue) for o in (self.out_shardings_leaves or [])) or
+            any(i is not None for i in (self.in_layouts_leaves or [])) or
+            any(o is not None for o in (self.out_layouts_leaves or [])) or
             self.compiler_options_kvs)
 
 

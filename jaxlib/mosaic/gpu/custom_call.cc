@@ -119,7 +119,7 @@ limitations under the License.
 #include "xla/backends/gpu/ffi.h"
 #include "xla/backends/gpu/runtime/collective_clique_requests.h"
 #include "xla/backends/gpu/runtime/collective_execution.h"
-#include "xla/backends/gpu/runtime/collective_metadata_thunk.h"
+#include "xla/backends/gpu/runtime/collective_kernel_api.h"
 #include "xla/backends/gpu/runtime/collective_params.h"
 #include "xla/core/collectives/rank_id.h"
 #include "xla/executable_run_options.h"
@@ -702,6 +702,31 @@ struct CustomCallResources {
   CompiledKernel* kernel = nullptr;
 };
 
+// TODO(b/481949311): Move to the dedicated state tied to the module execution
+// and provided by the XLA runtime. The state should be created during the
+// Prepare stage, acquire resources during the Initialize stage, and get used
+// during the Execute stage.
+//
+// The lifetime of this metadata is shorter than that of `CustomCallResources`,
+// which is associated with a thunk. We rely here on the following
+// assumptions:
+//   1. for a given thread/device, the pointer to a thunk's
+//      `CustomCallResources` is stable throughout the `Initialize`
+//      and `Execute` stages;
+//   2. a thunk's `CustomCallResources` are not shared with other
+//      thunks (we return a `std::unique_ptr`);
+//   3. for a given thread, the `Prepare` is called on a given thunk
+//      only after all previously prepared resources have been used
+//      (i.e. for a thunk T, the operations `Prepare(T)`,
+//      `Initialize(T)`, and `Execute(T)` directly follow each other,
+//      and `Prepare(T)` may only be called again after the previous
+//      iteration's `Execute(T)` has completed.
+//
+// This allows us to reliably clean up resources in `Prepare`.
+thread_local absl::NoDestructor<
+    std::map<CustomCallResources*, std::vector<char>>>
+    cpu_metadata_buffers;
+
 // Validate custom call attributes and compile the kernel.
 absl::StatusOr<std::unique_ptr<CustomCallResources>> InstantiateResources(
     const se::GpuComputeCapability* cc, ffi::Dictionary attrs) {
@@ -826,7 +851,7 @@ absl::StatusOr<std::vector<char>> CreateCollectiveMetadata(
     std::vector<se::DeviceAddressBase> parameters) {
   TF_ASSIGN_OR_RETURN(
       std::vector<void*> param_to_peers,
-      xla::gpu::CollectiveMetadataThunk::CollectParamToPeers(
+      xla::gpu::CollectParamToPeers(
           clique_key, current_rank, stream, std::move(parameters)));
   CollectiveKernelMetadata metadata;
   metadata.rank = current_rank.value();
@@ -834,7 +859,7 @@ absl::StatusOr<std::vector<char>> CreateCollectiveMetadata(
   // TODO(b/476264413): Support multimem.
   std::vector<void*> param_to_multimem;
   TF_RETURN_IF_ERROR(
-      xla::gpu::CollectiveMetadataThunk::CopyCollectiveMetadataToDevice(
+      xla::gpu::CopyCollectiveMetadataToDevice(
           stream, metadata, param_to_peers, param_to_multimem,
           collective_metadata_ptr));
 
@@ -896,6 +921,8 @@ absl::Status MosaicGpuInitialize(
       std::vector<char> cpu_metadata_buffer,
       CreateCollectiveMetadata(clique_key, current_rank, stream,
                                collective_metadata_ptr, std::move(parameters)));
+  cpu_metadata_buffers->insert_or_assign(resources,
+                                         std::move(cpu_metadata_buffer));
   return absl::OkStatus();
 }
 
@@ -910,6 +937,13 @@ absl::Status MosaicGpuExecute(
   buffer_ptrs.reserve(buffers.size() + (uses_collective_metadata ? 1 : 0));
   for (const xla::ffi::AnyBuffer& buffer : buffers) {
     buffer_ptrs.push_back(buffer.untyped_data());
+  }
+
+  // Adding a CPU version of the collective metadata for TMA initialization.
+  if (uses_collective_metadata) {
+    std::vector<char>& cpu_metadata_buffer =
+        cpu_metadata_buffers->at(resources);
+    buffer_ptrs.push_back(cpu_metadata_buffer.data());
   }
 
   CompiledKernel* kernel = resources->kernel;
@@ -933,6 +967,10 @@ absl::Status MosaicGpuPrepare(
 
   CHECK(collective_params != nullptr);
   CHECK(clique_requests != nullptr);
+
+  // This is safe to do because this resource is thread-local, and all previous
+  // executions are guaranteed to have completed.
+  cpu_metadata_buffers->clear();
 
   TF_ASSIGN_OR_RETURN(xla::gpu::GpuCliqueKey clique_key,
                       GetCliqueKey(*collective_params, attributes));
@@ -971,7 +1009,7 @@ XLA_FFI_DEFINE_HANDLER(kMosaicGpuInitialize, MosaicGpuInitialize,
 // - use_custom_barrier
 // - uses_xla_collective_metadata (optional)
 XLA_FFI_DEFINE_HANDLER(kMosaicGpuExecute, MosaicGpuExecute,
-                       ffi::Ffi::Bind<ffi::ExecutionStage::kExecute>()
+                       ffi::Ffi::BindExecute()
                            .Ctx<ffi::PlatformStream<cudaStream_t>>()
                            .Ctx<ffi::CollectiveParams>()
                            .RemainingArgs()

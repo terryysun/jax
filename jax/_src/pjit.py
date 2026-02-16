@@ -170,7 +170,8 @@ def _run_python_pjit(p, args_flat, fun: Callable, args, kwargs):
     if getattr(fun, '_apply_primitive', False):
       raise FloatingPointError(
           f"invalid value ({e.ty}) encountered in {fun.__qualname__}") from None
-    api_util.maybe_recursive_nan_check(e, fun, args, kwargs)
+    api_util.maybe_recursive_nan_check(e, fun, args, kwargs)  # should always raise.
+    raise RuntimeError("Internal error") from e  # fall-back error to be safe.
 
   outs = tree_unflatten(p.out_tree, out_flat)
   return (outs, out_flat, p.out_tree, args_flat,
@@ -1397,7 +1398,6 @@ def _pjit_cached_lower_jaxpr_to_fun(ctx: mlir.LoweringRuleContext,
     # directly on the inputs or outputs because they are lost during MLIR->HLO
     # conversion. using_sharding_annotation=False means we add an identity
     # operation instead.
-    num_callbacks = len(mod_ctx.host_callbacks)
     func = mlir.lower_jaxpr_to_fun(
         mod_ctx, name, jaxpr, effects,
         num_const_args=num_const_args, in_avals=in_avals,
@@ -1405,12 +1405,7 @@ def _pjit_cached_lower_jaxpr_to_fun(ctx: mlir.LoweringRuleContext,
         use_sharding_annotations=False,
         arg_layouts=in_layouts, result_layouts=out_layouts)
 
-    # If this Jaxpr includes callbacks, we can't cache the lowering because
-    # on TPU every callback must have a globally unique channel under
-    # libtpu <= 0.0.34, but the channel gets assigned during lowering.
-    has_callbacks = len(mod_ctx.host_callbacks) > num_callbacks
-    if mlir.USE_NEW_TPU_CALLBACK_LOWERING or not has_callbacks or "tpu" not in mod_ctx.platforms:
-      mod_ctx.cached_primitive_lowerings[key] = func
+    mod_ctx.cached_primitive_lowerings[key] = func
   return func
 
 
@@ -1420,7 +1415,7 @@ def _pjit_lowering(ctx: mlir.LoweringRuleContext, *args, name: str,
                    ctx_mesh, keep_unused, inline, compiler_options_kvs):
   effects = list(ctx.tokens_in.effects())
   output_types = map(mlir.aval_to_ir_type, ctx.avals_out)
-  output_types = [mlir.token_type()] * len(effects) + output_types
+  output_types = [mlir.token_type()] * len(effects) + output_types  # pyrefly: ignore[unsupported-operation]  # pyrefly#2385
   flat_output_types = mlir.flatten_ir_types(output_types)
 
   const_args_and_avals = core.jaxpr_const_args(jaxpr.jaxpr)
@@ -1773,11 +1768,11 @@ def _pjit_partial_eval(trace: pe.JaxprTrace,
 
   # Set up staged-out 'unknown' eqn
   unknown_in_shardings = (keep_where(in_shardings, unknown_ins)
-                          + (UNSPECIFIED,) * len(residual_tracers))
+                          + (UNSPECIFIED,) * len(residual_tracers))  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
   unknown_in_layouts = (keep_where(in_layouts, unknown_ins)
-                        + (None,) * len(residual_tracers))
+                        + (None,) * len(residual_tracers))  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
   unknown_donated_invars = (keep_where(donated_invars, unknown_ins)
-                            + (False,) * len(residual_tracers))
+                            + (False,) * len(residual_tracers))  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
   unknown_params = dict(
       jaxpr=unknown_jaxpr,
       in_shardings=unknown_in_shardings,

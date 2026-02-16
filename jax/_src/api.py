@@ -985,7 +985,7 @@ def _unravel_array_into_pytree(pytree, axis, example, arr, specs):
   leaves, treedef = tree_flatten(pytree)
   specs, _ = tree_flatten(specs)
   shapes = [arr.shape[:axis] + np.shape(l) + arr.shape[axis+1:] for l in leaves]
-  parts = _split(arr, np.cumsum(map(np.size, leaves[:-1])), axis)
+  parts = _split(arr, np.cumsum(map(np.size, leaves[:-1])), axis)  # pyrefly: ignore[no-matching-overload]  # pyrefly#2385
   reshaped_parts = [
       _possible_downcast(np.reshape(x, shape),
                          leaf if example is None else example,
@@ -1158,13 +1158,17 @@ def vmap(fun: F,
     # rather than raising an error. https://github.com/jax-ml/jax/issues/2367
     in_axes = tuple(in_axes)
 
-  if not (in_axes is None or type(in_axes) in {int, tuple, *batching.spec_types}):
+  from jax._src import hijax  # type: ignore
+  if not (in_axes is None or type(in_axes) in {int, tuple, *batching.spec_types}
+          or isinstance(in_axes, hijax.MappingSpec)):
     raise TypeError("vmap in_axes must be an int, None, or a tuple of entries corresponding "
                     f"to the positional arguments passed to the function, but got {in_axes}.")
-  if not all(type(l) in {int, *batching.spec_types} for l in tree_leaves(in_axes)):
+  if not all(type(l) in {int, *batching.spec_types} or isinstance(l, hijax.MappingSpec)
+             for l in tree_leaves(in_axes)):
     raise TypeError("vmap in_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {in_axes}.")
-  if not all(type(l) in {int, *batching.spec_types} for l in tree_leaves(out_axes)):
+  if not all(type(l) in {int, *batching.spec_types} or isinstance(l, hijax.MappingSpec)
+             for l in tree_leaves(out_axes)):
     raise TypeError("vmap out_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {out_axes}.")
 
@@ -1234,7 +1238,7 @@ def _mapped_axis_spec(args_flat, in_axes_flat):
     try:
       # Duck type arrays like BCOO arrays can be passed to vmap.
       return shaped_abstractify(arg).sharding.spec[i]
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, AttributeError):
       return None
 
   out_spec = None
@@ -1798,6 +1802,7 @@ def _cpp_pmap(
     )
 
     execute: Callable | None = None
+    const_args = []
     with core.take_current_trace() as trace:
       try:
         if isinstance(trace, core.EvalTrace):
@@ -2121,48 +2126,6 @@ def _lift_linearized(jaxpr, primal_avals, io_tree, out_pvals, consts, *py_args):
 
   return apply_flat_fun_nokwargs(fun, io_tree, py_args)
 
-@api_boundary
-def _vjp_pullback_wrapper(name, out_primal_avals, io_tree, fun, *py_args_):
-  if len(py_args_) != 1:
-    msg = (f"The function returned by `jax.vjp` applied to {name} was called "
-           f"with {len(py_args_)} arguments, but functions returned by "
-           "`jax.vjp` must be called with a single argument corresponding to "
-           f"the single value returned by {name} (even if that returned "
-           "value is a tuple or other container).\n"
-           "\n"
-           "For example, if we have:\n"
-           "\n"
-           "  def f(x):\n"
-           "    return (x, x)\n"
-           "  _, f_vjp = jax.vjp(f, 1.0)\n"
-           "\n"
-           "the function `f` returns a single tuple as output, and so we call "
-           "`f_vjp` with a single tuple as its argument:\n"
-           "\n"
-           "  x_bar, = f_vjp((2.0, 2.0))\n"
-           "\n"
-           "If we instead call `f_vjp(2.0, 2.0)`, with the values 'splatted "
-           "out' as arguments rather than in a tuple, this error can arise.")
-    raise TypeError(msg)
-  py_args, = py_args_
-  in_tree_expected, out_tree = io_tree
-  args, in_tree = tree_flatten(py_args)
-  if in_tree != in_tree_expected:
-    raise ValueError(f"unexpected tree structure of argument to vjp function: "
-                     f"got {in_tree}, but expected to match {in_tree_expected}")
-  for arg, aval in zip(args, out_primal_avals):
-    ct_aval = shaped_abstractify(arg)
-    ct_aval_expected = aval.to_cotangent_aval()
-    if (not core.typecompat(ct_aval, ct_aval_expected) and
-        not _temporary_dtype_exception(ct_aval, ct_aval_expected)):
-      raise ValueError(
-          "unexpected JAX type (e.g. shape/dtype) for argument to vjp function: "
-          f"got {ct_aval.str_short()}, but expected {ct_aval_expected.str_short()} "
-          f"because the corresponding output of the function {name} had JAX type "
-          f"{aval.str_short()}")
-  ans = fun(*args)
-  return tree_unflatten(out_tree, ans)
-
 # TODO(mattjj): see similar function in custom_derivatives.py
 def _temporary_dtype_exception(a, a_) -> bool:
   if isinstance(a, core.ShapedArray) and isinstance(a_, core.ShapedArray):
@@ -2461,9 +2424,9 @@ def linear_transpose(fun: Callable, *primals, reduce_axes=()) -> Callable:
   jaxpr, _ = pe.dce_jaxpr(jaxpr, [True] * len(jaxpr.outvars), True)
   out_avals, _ = unzip2(out_pvals)
   out_dtypes = map(lambda a: a.dtype, out_avals)
-  if not (all(dtypes.issubdtype(d, np.inexact) for d in in_dtypes + out_dtypes)
+  if not (all(dtypes.issubdtype(d, np.inexact) for d in in_dtypes + out_dtypes)  # pyrefly: ignore[unsupported-operation]  # pyrefly#2385
           or all(dtypes.issubdtype(d, np.integer)
-                 for d in in_dtypes + out_dtypes)):
+                 for d in in_dtypes + out_dtypes)):  # pyrefly: ignore[unsupported-operation]  # pyrefly#2385
     raise TypeError("linear_transpose only supports [float or complex] -> "
                     "[float or complex], and integer -> integer functions, "
                     f"but got {in_dtypes} -> {out_dtypes}.")

@@ -32,10 +32,10 @@ package(
 
 cc_library(
     name = "cuda_vendor",
-    hdrs = [
+    defines = ["JAX_GPU_CUDA=1"],
+    textual_hdrs = [
         "//jaxlib/gpu:vendor.h",
     ],
-    defines = ["JAX_GPU_CUDA=1"],
     visibility = ["//visibility:public"],
     deps = [
         "@local_config_cuda//cuda:cuda_headers",
@@ -534,11 +534,10 @@ cc_library(
         ":cuda_gpu_kernel_helpers",
         ":cuda_vendor",
         "@com_google_absl//absl/base:dynamic_annotations",
+        "@com_google_absl//absl/synchronization",
         "@xla//xla/tsl/cuda:cublas",
         "@xla//xla/tsl/cuda:cudart",
-        "@xla//xla/tsl/cuda:cudnn",
         "@xla//xla/tsl/cuda:cufft",
-        "@xla//xla/tsl/cuda:cupti",
         "@xla//xla/tsl/cuda:cusolver",
         "@xla//xla/tsl/cuda:cusparse",
     ],
