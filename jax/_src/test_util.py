@@ -696,12 +696,6 @@ def skip_under_pytest(reason: str):
   return skip
 
 
-def format_test_name_suffix(opname, shapes, dtypes):
-  arg_descriptions = (format_shape_dtype_string(shape, dtype)
-                      for shape, dtype in zip(shapes, dtypes))
-  return '{}_{}'.format(opname.capitalize(), '_'.join(arg_descriptions))
-
-
 # We use special symbols, represented as singleton objects, to distinguish
 # between NumPy scalars, Python scalars, and 0-D arrays.
 class ScalarShape:
