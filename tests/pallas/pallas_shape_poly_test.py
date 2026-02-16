@@ -30,9 +30,12 @@ from jax._src import test_util as jtu
 from jax._src.pallas import pallas_call
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from jax.experimental.pallas import triton as plgpu
 from jax import export
 import numpy as np
+try:
+  from jax.experimental.pallas import triton as plgpu
+except ImportError:  # Fails on Windows.
+  plgpu = None
 
 
 config.update("jax_traceback_filtering", "off")
@@ -140,6 +143,8 @@ class ShapePolyTest(jtu.JaxTestCase,
     with self.assertRaisesRegex(
         NotImplementedError,
         "dynamic grid bounds not supported in the Triton backend"):
+      if plgpu is None:
+        self.skipTest("Triton not available")
       export.export(
           jax.jit(functools.partial(f, compiler_params=plgpu.CompilerParams())),
           platforms=["cuda"])(jax.ShapeDtypeStruct((w, h), jnp.int32))
