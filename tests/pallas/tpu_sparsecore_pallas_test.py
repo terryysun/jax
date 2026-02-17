@@ -1361,13 +1361,27 @@ class VectorSubcoreTest(PallasSCTest):
 
     np.testing.assert_array_equal(kernel(x), np.cumsum(x))
 
-  @parameterized.product(dtype=[jnp.int32, jnp.float32], op=[jnp.sum, jnp.max])
+  @parameterized.product(dtype=[jnp.uint32, jnp.int32, jnp.float32],
+                         op=[jnp.sum, jnp.max, jnp.min])
   def test_reductions(self, dtype, op):
     x = jnp.arange(self.sc_info.num_lanes, dtype=dtype)
     @self.vector_subcore_kernel(out_shape=x)
     def kernel(x_ref, o_ref):
       o_ref[...] = jnp.full(o_ref.shape, op(x_ref[...]))
     np.testing.assert_array_equal(kernel(x)[0], op(x))
+    np.testing.assert_array_equal(kernel(x[::-1])[0], op(x[::-1]))
+    if dtype != jnp.uint32:
+      np.testing.assert_array_equal(kernel(-x)[0], op(-x))
+      np.testing.assert_array_equal(kernel(-x[::-1])[0], op(-x[::-1]))
+
+  @parameterized.product(dtype=[jnp.bool], op=[jnp.all, jnp.any])
+  def test_binary_reductions(self, dtype, op):
+    x = jnp.ones(self.sc_info.num_lanes, dtype=dtype)
+    @self.vector_subcore_kernel(out_shape=x.astype(jnp.int32))
+    def kernel(x_ref, o_ref):
+      o_ref[...] = jnp.full(o_ref.shape, op(x_ref[...] != 0)).astype(jnp.int32)
+    np.testing.assert_array_equal(
+        kernel(x.astype(jnp.int32))[0].astype(dtype), op(x))
 
   @parameterized.product(dtype=[jnp.int32, jnp.float32])
   def test_cumsum_2d_not_supported(self, dtype):

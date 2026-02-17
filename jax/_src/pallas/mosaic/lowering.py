@@ -2065,7 +2065,7 @@ _reduce_sum_lowering_rule = reduce_lowering_rule(
 register_lowering_rule(lax.reduce_sum_p)(_reduce_sum_lowering_rule)
 
 
-@register_lowering_rule(lax.reduce_and_p)
+@register_lowering_rule(lax.reduce_and_p, kernel_types=[*tpu_core.KernelType])
 def _reduce_and_lowering_rule(ctx: LoweringRuleContext, x, *, axes):
   def _proxy_reduce(arg, *, axes):
     # Mosaic currently only supports float reductions, so we cast the boolean
@@ -2079,7 +2079,7 @@ def _reduce_and_lowering_rule(ctx: LoweringRuleContext, x, *, axes):
   return proxy_lowering(ctx, x, axes=axes)
 
 
-@register_lowering_rule(lax.reduce_or_p)
+@register_lowering_rule(lax.reduce_or_p, kernel_types=[*tpu_core.KernelType])
 def _reduce_or_lowering_rule(ctx: LoweringRuleContext, x, *, axes):
   def _proxy_reduce(arg, *, axes):
     # Mosaic currently only supports float reductions, so we cast the boolean

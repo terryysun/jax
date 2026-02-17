@@ -526,21 +526,78 @@ def scan_count(
 masked_cummax_p = jax_core.Primitive("masked_cummax")
 masked_cummax_p.multiple_results = False
 
+masked_cummin_p = jax_core.Primitive("masked_cummin")
+masked_cummin_p.multiple_results = False
+
+masked_cumsum_p = jax_core.Primitive("masked_cumsum")
+masked_cumsum_p.multiple_results = False
+
+
 @masked_cummax_p.def_abstract_eval
+@masked_cummin_p.def_abstract_eval
+@masked_cumsum_p.def_abstract_eval
 def _masked_cummax_abstract_eval(x, mask):
-  if x.dtype != jnp.int32 and x.dtype != jnp.float32:
-    raise NotImplementedError(f"x.dtype={x.dtype} must be int32 or float32")
+  if x.dtype not in (jnp.uint32, jnp.int32, jnp.float32):
+    raise NotImplementedError(
+        f"x.dtype={x.dtype} must be uint32, int32 or float32")
   if not jnp.issubdtype(mask.dtype, jnp.bool):
     raise TypeError(f"mask.dtype={mask.dtype} is not a boolean dtype")
   if x.shape != mask.shape:
     raise ValueError(f"x.shape={x.shape} != mask.shape={mask.shape}")
   return x
 
-@sc_lowering.register_lowering_rule(masked_cummax_p)
-def _masked_cummax_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, mask):
-  del ctx  # Unused.
-  return tpu.scan(
-      x.type, x, ir.Attribute.parse("#tpu.reduction_kind<max>"), mask=mask)
+
+def _masked_cumop_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, mask,
+                                *, reduction_kind: str):
+  sign_bit_vec = None
+  # tpu.scan comparisons assume unsigned int predicates, so we compare
+  # with the sign bit flipped.
+  if ctx.avals_in[0].dtype == jnp.int32 and reduction_kind in ("max", "min"):
+    u32 = ir.IntegerType.get_signless(32)
+    sign_bit_vec = vector.broadcast(
+        x.type, arith.constant(u32, ir.IntegerAttr.get(u32, 0x80000000)))
+    x = arith.xori(x, sign_bit_vec)
+  result = tpu.scan(
+      x.type, x, ir.Attribute.parse(f"#tpu.reduction_kind<{reduction_kind}>"),
+      mask=mask)
+  if sign_bit_vec is not None:  # Flip the sign bit back
+    return arith.xori(result, sign_bit_vec)
+  return result
+
+
+sc_lowering.register_lowering_rule(masked_cummax_p)(
+    functools.partial(_masked_cumop_lowering_rule, reduction_kind="max"))
+sc_lowering.register_lowering_rule(masked_cummin_p)(
+    functools.partial(_masked_cumop_lowering_rule, reduction_kind="min"))
+sc_lowering.register_lowering_rule(masked_cumsum_p)(
+    functools.partial(_masked_cumop_lowering_rule, reduction_kind="sum"))
+
+
+def _reduce_op_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, axes,
+                             *, reduction_kind, out_sharding=None):
+  del out_sharding  # Unused.
+  if axes != (0,):
+    raise NotImplementedError(
+        f"reductions require axes to be (0,) on SparseCore, but got {axes}.")
+  vec_dim = ctx.avals_in[0].shape[0]
+  i1t = ir.IntegerType.get_signless(1)
+  c1 = arith.constant(i1t, ir.IntegerAttr.get(i1t, 1))
+  x_shp = ctx.avals_in[0].shape
+  c1v = vector.broadcast(ir.VectorType.get(x_shp, c1.type), c1)
+  return vector.extract(
+      _masked_cumop_lowering_rule(ctx, x, c1v, reduction_kind=reduction_kind),
+      [], [vec_dim - 1])
+
+sc_lowering.register_lowering_rule(
+    lax.reduce_max_p, kernel_types=[tpu_core.KernelType.SC_VECTOR_SUBCORE])(
+    functools.partial(_reduce_op_lowering_rule, reduction_kind="max"))
+sc_lowering.register_lowering_rule(
+    lax.reduce_min_p, kernel_types=[tpu_core.KernelType.SC_VECTOR_SUBCORE])(
+    functools.partial(_reduce_op_lowering_rule, reduction_kind="min"))
+sc_lowering.register_lowering_rule(
+    lax.reduce_sum_p, kernel_types=[tpu_core.KernelType.SC_VECTOR_SUBCORE])(
+    functools.partial(_reduce_op_lowering_rule, reduction_kind="sum"))
+
 
 def cummax(x: jax.Array, *, mask: jax.Array | None = None) -> jax.Array:
   """Returns the cumulative max of the array along its innermost axis.
@@ -556,43 +613,31 @@ def cummax(x: jax.Array, *, mask: jax.Array | None = None) -> jax.Array:
       are eligible for the max. If `None`, all elements are eligible.
   """
   if x.ndim != 1:
-    raise NotImplementedError(f"masked_cummax: x={x.aval} must be rank 1")
+    raise NotImplementedError(f"cummax: x={x.aval} must be rank 1")
   if mask is None:
     mask = lax.full(x.shape, True)
   return masked_cummax_p.bind(x, mask)
 
-@sc_lowering.register_lowering_rule(
-    lax.reduce_max_p, kernel_types=[tpu_core.KernelType.SC_VECTOR_SUBCORE])
-def _reduce_max_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, axes):
-  if axes != (0,):
-    raise NotImplementedError(
-        f"reduce_max requires axes to be (0,) on SparseCore, but got {axes}.")
-  vec_dim = ctx.avals_in[0].shape[0]
-  i1t = ir.IntegerType.get_signless(1)
-  c1 = arith.constant(i1t, ir.IntegerAttr.get(i1t, 1))
-  c1v = vector.broadcast(ir.VectorType.get(x.type.shape, c1.type), c1)
-  return vector.extract(
-      _masked_cummax_lowering_rule(ctx, x, c1v), [], [vec_dim - 1])
 
+def cummin(x: jax.Array, *, mask: jax.Array | None = None) -> jax.Array:
+  """Returns the cumulative min of the array along its innermost axis.
 
-masked_cumsum_p = jax_core.Primitive("masked_cumsum")
-masked_cumsum_p.multiple_results = False
+  Elements from `x` will pass through directly to the result until the first
+  valid value is encountered (`mask[i] == True`). If you would like to specify
+  a default value for such elements instead, write
+  `x = jnp.where(mask, x, default_value)` before or after calling this function.
 
-@masked_cumsum_p.def_abstract_eval
-def _masked_cumsum_abstract_eval(x, mask):
-  if x.dtype != jnp.int32 and x.dtype != jnp.float32:
-    raise NotImplementedError(f"x.dtype={x.dtype} must be int32 or float32")
-  if not jnp.issubdtype(mask.dtype, jnp.bool):
-    raise TypeError(f"mask.dtype={mask.dtype} is not a boolean dtype")
-  if x.shape != mask.shape:
-    raise ValueError(f"x.shape={x.shape} != mask.shape={mask.shape}")
-  return jax_core.ShapedArray(x.shape, x.dtype)
+  Args:
+    x: An array of integers or floats.
+    mask: An optional array of booleans, which specifies which elements of `x`
+      are eligible for the min. If `None`, all elements are eligible.
+  """
+  if x.ndim != 1:
+    raise NotImplementedError(f"cummin: x={x.aval} must be rank 1")
+  if mask is None:
+    mask = lax.full(x.shape, True)
+  return masked_cummin_p.bind(x, mask)
 
-@sc_lowering.register_lowering_rule(masked_cumsum_p)
-def _masked_cumsum_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, mask):
-  del ctx  # Unused.
-  return tpu.scan(
-      x.type, x, ir.Attribute.parse("#tpu.reduction_kind<sum>"), mask=mask)
 
 @sc_lowering.register_lowering_rule(lax.cumsum_p)
 def _cumsum_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, axis,
@@ -609,6 +654,7 @@ def _cumsum_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, axis,
   return tpu.scan(
       x.type, x, ir.Attribute.parse("#tpu.reduction_kind<sum>"), mask=c1v)
 
+
 def cumsum(x: jax.Array, *, mask: jax.Array | None = None) -> jax.Array:
   """Returns the cumulative sum of the array along its innermost axis.
 
@@ -624,17 +670,6 @@ def cumsum(x: jax.Array, *, mask: jax.Array | None = None) -> jax.Array:
   if mask is None:
     mask = lax.full(x.shape, True)
   return masked_cumsum_p.bind(x, mask)
-
-@sc_lowering.register_lowering_rule(
-    lax.reduce_sum_p, kernel_types=[tpu_core.KernelType.SC_VECTOR_SUBCORE])
-def _reduce_sum_lowering_rule(
-    ctx: sc_lowering.LoweringRuleContext, x, axes, out_sharding):
-  del out_sharding  # Unused.
-  vec_dim = ctx.avals_in[0].shape[0]
-  if axes != (0,):
-    raise NotImplementedError(f"SC reduce_sum: axes={axes} must be (0,).")
-  return vector.extract(
-      _cumsum_lowering_rule(ctx, x, 0, reverse=False), [], [vec_dim - 1])
 
 
 masked_sort_p = jax_core.Primitive("masked_sort")
