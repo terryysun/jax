@@ -1146,7 +1146,8 @@ debug_key_reuse = bool_state(
           ' usage tracked, and incorrect reuse of a previously-used key will lead to'
           ' an error. Currently enabling this leads to a small Python overhead on'
           ' every call to a JIT-compiled function with keys as inputs or outputs.'),
-    include_in_trace_context=True)
+    include_in_trace_context=True,
+    include_in_jit_key=True)
 
 check_tracer_leaks = bool_state(
     name='jax_check_tracer_leaks',
