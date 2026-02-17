@@ -2051,6 +2051,13 @@ class LaxControlFlowTest(jtu.JaxTestCase):
                                   x[2]), None),
                    (jnp.array(0, 'int32'),) * 3, None, length=1)
 
+  def testScanLengthError(self):
+    x = jnp.arange(10)
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        "scan got `length` argument of 5 which disagrees with leading axis sizes [10]."):
+      jax.lax.scan(lambda *args: args, 0, x, length=5)
+
   @jax.enable_checks(False)
   def testScanInvalidUnrollRaises(self):
     with self.assertRaisesRegex(ValueError, "`unroll` must be"):
