@@ -352,16 +352,18 @@ def _infer_scan_length(
 
   if length is not None:
     try:
-      return int(length)
+      length = int(length)
     except core.ConcretizationTypeError:
       msg = ('The `length` argument to `scan` expects a concrete `int` value.'
              ' For scan-like iteration with a dynamic length, use `while_loop`'
              ' or `fori_loop`.')
       raise core.ConcretizationTypeError(length, msg) from None  # type: ignore[arg-type]
-    if not all(length == l for l in lengths):
-      msg = ("scan got `length` argument of {} which disagrees with "
-             "leading axis sizes {}.")
-      raise ValueError(msg.format(length, [x.shape[0] for x in xs_flat]))
+    else:
+      if not all(length == l for l in lengths):
+        msg = ("scan got `length` argument of {} which disagrees with "
+              "leading axis sizes {}.")
+        raise ValueError(msg.format(length, [x.shape[0] for x in xs_flat]))
+      return length
   else:
     unique_lengths = set(lengths)
     if len(unique_lengths) > 1:
