@@ -70,9 +70,9 @@ PyObject* SafeMap(PyObject* self, PyObject* const* args, Py_ssize_t nargs) {
   absl::InlinedVector<PyObject*, 4> values(nargs, nullptr);
   while (true) {
     absl::Cleanup values_cleanup = [&values]() {
-      for (PyObject* v : values) {
-        Py_XDECREF(v);
-        v = nullptr;
+      for (size_t i = 1; i < values.size(); ++i) {
+        Py_XDECREF(values[i]);
+        values[i] = nullptr;
       }
     };
     values[1] = PyIter_Next(iterators[0].ptr());
@@ -158,9 +158,9 @@ PyObject* ForEach(PyObject* self, PyObject* const* args, Py_ssize_t nargs) {
   absl::InlinedVector<PyObject*, 4> values(nargs, nullptr);
   while (true) {
     absl::Cleanup values_cleanup = [&values]() {
-      for (PyObject* v : values) {
-        Py_XDECREF(v);
-        v = nullptr;
+      for (size_t i = 1; i < values.size(); ++i) {
+        Py_XDECREF(values[i]);
+        values[i] = nullptr;
       }
     };
     values[1] = PyIter_Next(iterators[0].ptr());
