@@ -240,43 +240,48 @@ class TupP(HipSpec):
   def to_lo(self) -> tuple[jax.PartitionSpec, ...]:
     return self.val
 
-class MakeTup(HiPrimitive):
-  def abstract_eval(_, *in_avals):
-    return TupTy(in_avals), set()
+class MakeTup(VJPHiPrimitive):
+  def __init__(self, in_avals):
+    in_avals = tuple(in_avals)
+    self.in_avals = in_avals
+    self.out_aval = TupTy(in_avals)
+    self.params = {}
+    super().__init__()
 
-  def to_lojax(self, *elts):
+  def expand(self, *elts):
     return HiTup(elts)
-make_tup_p = MakeTup('make_tup')
 
-class GetTupElt(HiPrimitive):
-  def abstract_eval(_, tup, *, idx):
-    return tup.tys[idx], set()
+  def batch(self, _axis_data, args, in_dims):
+    return make_tup(*args), TupSpec(in_dims)
 
-  def to_lojax(self, tup, *, idx):
-    return tup.elts[idx]
+class GetTupElt(VJPHiPrimitive):
+  def __init__(self, in_aval, idx):
+    self.in_avals = in_aval,
+    self.out_aval = in_aval.tys[idx]
+    self.params = dict(idx=idx)
+    super().__init__()
 
-  def jvp(self, primals, tangents, *, idx):
-    (tup,), (tup_dot,) = primals, tangents
-    return tup.elts[idx], get_tuple_element(tup_dot, idx)
+  def expand(self, tup):
+    return tup.elts[self.idx]
 
-  def transpose(self, out_bar, tup, *, idx):
-    if ad.is_undefined_primal(tup):
-      tup_ty = tup.aval
-    else:
-      tup_ty = tup
-    out_elts = [
-      jnp.zeros(elt_ty.shape, elt_ty.dtype) for elt_ty in tup_ty.tys
-    ]
-    out_elts[idx] = out_bar
-    return [make_tup(*out_elts)]
+  def vjp_fwd(self, tup):
+    return get_tuple_element(tup, self.idx), None
 
-get_tup_elt_p = GetTupElt('get_tup_elt')
+  def vjp_bwd_retval(self, _res, g):
+    tup_ty, = self.in_avals
+    elts = map(ad.zeros_like_aval, tup_ty.tys)
+    elts[self.idx] = g
+    return make_tup(*elts),
+
+  def batch(self, _axis_data, args, in_dims):
+    (x,), (d,) = args, in_dims
+    return get_tuple_element(x, self.idx), d.val[self.idx]
 
 def make_tup(*elts):
-  return make_tup_p.bind(*elts)
+  return MakeTup(map(typeof, elts))(*elts)
 
 def get_tuple_element(tup, idx):
-  return get_tup_elt_p.bind(tup, idx=idx)
+  return GetTupElt(typeof(tup), idx)(tup)
 
 @dataclass(frozen=True)
 class ImmutBox:
@@ -717,6 +722,13 @@ class HijaxTest(jtu.JaxTestCase):
   #   tup = make_tup(jnp.arange(3.), jnp.arange(3.))
   #   jax.vmap(lambda _: make_tup(jnp.ones(3), jnp.ones(3)),
   #            in_axes=TupSpec((0, 0)), out_axes=TupSpec((0, 0)), axis_size=3)(tup)
+
+  def test_tuple_vmap_primitive(self):
+    tup = make_tup(jnp.arange(3.), 5.)
+    def f(tup):
+      a, b = get_tuple_element(tup, 0), get_tuple_element(tup, 1)
+      return make_tup(b, a)
+    jax.vmap(f, in_axes=TupSpec((0, None)), out_axes=TupSpec((None, 0)), axis_size=3)(tup)
 
   @parameterized.parameters([False, True])
   def test_tuple_scan(self, jit):
