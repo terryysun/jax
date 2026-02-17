@@ -44,9 +44,6 @@ import jax.numpy as jnp
 
 
 _ensure_ir_value = tc_lowering._ensure_mlir_value
-aval_to_ir_type = functools.partial(
-    tc_lowering.aval_to_ir_type, sc_lowering.dynamic_shape_replacement_fn
-)
 
 TransformedRef: TypeAlias = state_types.TransformedRef
 Ref: TypeAlias = state_types.AbstractRef | TransformedRef
@@ -427,7 +424,7 @@ def _bitcast_abstract_eval(x, dtype):
 def _bitcast_lowering_rule(ctx: sc_lowering.LoweringRuleContext, x, *, dtype):
   del dtype  # Unused.
   [out_aval] = ctx.avals_out
-  return vector.bitcast(aval_to_ir_type(out_aval), x)
+  return vector.bitcast(ctx.aval_to_ir_type(out_aval), x)
 
 
 def bitcast(x: jax.Array, dtype: jax.typing.DTypeLike) -> jax.Array:
@@ -997,7 +994,7 @@ def _pack_lowering_rule(
   del preferred_element_type  # Unused.
   [out_aval] = ctx.avals_out
   return tpu.pack_subelements(
-      aval_to_ir_type(out_aval),
+      ctx.aval_to_ir_type(out_aval),
       [a, b],
       [0, 1],
       _format_to_ir_attribute(format),
@@ -1081,7 +1078,7 @@ def _unpack_lowering_rule(
 ):
   del preferred_element_type  # Unused.
   out_aval, _ = ctx.avals_out
-  out_type = aval_to_ir_type(out_aval)
+  out_type = ctx.aval_to_ir_type(out_aval)
   return (
       tpu.unpack_subelements(out_type, ab, 0, _format_to_ir_attribute(format)),
       tpu.unpack_subelements(out_type, ab, 1, _format_to_ir_attribute(format)),
