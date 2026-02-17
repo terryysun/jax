@@ -1882,6 +1882,25 @@ class VectorSubcoreTestWithTCTiling(VectorSubcoreTest):
 
 class ScalarSubcoreTest(PallasSCTest):
 
+  def test_pallas_call(self):
+    @functools.partial(
+        pl.pallas_call,
+        # TODO(slebedev): grid= should not be required.
+        grid=(1,),
+        out_shape=jax.ShapeDtypeStruct((self.num_lanes,), jnp.int32),
+        compiler_params=pltpu.CompilerParams(
+            kernel_type=pltpu.KernelType.SC_SCALAR_SUBCORE,
+            use_tc_tiling_on_sc=self.USE_TC_TILING,
+        ),
+    )
+    def kernel(x, out):
+      @pl.loop(0, x.size)
+      def _(i):
+        out[i] = x[i] + 1
+
+    x = jnp.arange(self.num_lanes)
+    np.testing.assert_array_equal(kernel(x), x + 1)
+
   def test_copy(self):
     x = jnp.arange(self.num_lanes)
 

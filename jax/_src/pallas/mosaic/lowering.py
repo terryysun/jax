@@ -267,11 +267,12 @@ class LoweringRuleContext:
         memory_space=memory_space,
         is_kernel_boundary=is_kernel_boundary,
         allow_extended_types=allow_extended_types,
+        kernel_type=self.lowering_context.kernel_type,
     )
 
 
 def _memory_space_to_tpu_memory_space(
-    memory_space: AnyMemorySpace | None,
+    memory_space: AnyMemorySpace | None, kernel_type: tpu_core.KernelType
 ) -> TPUMemorySpace | Literal[ANY]:
   if memory_space == jax_core.MemorySpace.Device:
     return ANY
@@ -280,7 +281,13 @@ def _memory_space_to_tpu_memory_space(
     case None:
       # We pick VMEM as the default one when no memory space is
       # specified
-      return TPUMemorySpace.VMEM
+      match kernel_type:
+        case tpu_core.KernelType.TC | tpu_core.KernelType.SC_VECTOR_SUBCORE:
+          return TPUMemorySpace.VMEM
+        case tpu_core.KernelType.SC_SCALAR_SUBCORE:
+          return TPUMemorySpace.SMEM
+        case _:
+          raise ValueError(f"Unsupported kernel type: {kernel_type}")
     case pallas_core.MemorySpace.ANY:
       # Map the general ANY memory space to TPU ANY memory space
       return ANY
@@ -299,10 +306,15 @@ def _memory_space_to_tpu_memory_space(
       raise ValueError(f"Invalid memory space: {memory_space}")
 
 
-def _memory_space_to_mosaic_attribute(memory_space: AnyMemorySpace | None
-                                      ) -> ir.Attribute:
-  tpu_memory_space = _memory_space_to_tpu_memory_space(memory_space)
+def _memory_space_to_mosaic_attribute(
+    memory_space: AnyMemorySpace | None,
+    kernel_type: tpu_core.KernelType,
+) -> ir.Attribute:
+  tpu_memory_space = _memory_space_to_tpu_memory_space(
+      memory_space, kernel_type
+  )
   return ir.Attribute.parse(f"#tpu.memory_space<{tpu_memory_space}>")
+
 
 def _dtype_to_ir_type(dtype: DTypeLike,
                       is_kernel_boundary: bool = False) -> ir.Type:
@@ -336,6 +348,7 @@ def aval_to_ir_type(
     memory_space: AnyMemorySpace | None = None,
     is_kernel_boundary: bool = False,
     allow_extended_types: bool = True,
+    kernel_type: tpu_core.KernelType,
 ):
   if allow_extended_types and should_physicalize_dtype(aval.dtype):
     if isinstance(aval, state.AbstractRef):
@@ -345,11 +358,15 @@ def aval_to_ir_type(
       physical_aval = jax_core.physical_aval(aval)  # pytype: disable=wrong-arg-types
     if shape is not None:
       shape = jax_core.physical_shape(shape, aval.dtype)
-    return aval_to_ir_type(dynamic_shape_replacement_fn,
-                           aval=physical_aval,
-                           shape=shape, memory_space=memory_space,
-                           is_kernel_boundary=is_kernel_boundary,
-                           allow_extended_types=False)
+    return aval_to_ir_type(
+        dynamic_shape_replacement_fn,
+        aval=physical_aval,
+        shape=shape,
+        memory_space=memory_space,
+        is_kernel_boundary=is_kernel_boundary,
+        allow_extended_types=False,
+        kernel_type=kernel_type,
+    )
   if isinstance(aval, tpu_core.AbstractSemaphore):
     if aval.sem_type is tpu_core.SemaphoreType.DMA:
       sem_type = ir.Type.parse("!tpu.dma_semaphore")
@@ -359,14 +376,16 @@ def aval_to_ir_type(
       sem_type = ir.Type.parse("!tpu.semaphore")
     else:
       raise ValueError(f"Cannot allocate {aval.sem_type}.")
-    memspace = _memory_space_to_mosaic_attribute(TPUMemorySpace.SEMAPHORE)
+    memspace = _memory_space_to_mosaic_attribute(
+        TPUMemorySpace.SEMAPHORE, kernel_type
+    )
     return ir.MemRefType.get((), sem_type, memory_space=memspace)
   if isinstance(aval, state.AbstractRef):
     if shape is None:
       shape = aval.shape
     if memory_space is None:
       memory_space = aval.memory_space
-    memspace = _memory_space_to_mosaic_attribute(memory_space)
+    memspace = _memory_space_to_mosaic_attribute(memory_space, kernel_type)
     shape = dynamic_shape_replacement_fn(shape)
     return ir.MemRefType.get(shape,
       _dtype_to_ir_type(aval.dtype, is_kernel_boundary=True),
@@ -432,19 +451,6 @@ def _get_aval_physical_dtype_shape(aval):
     return ()
 
 
-def _get_arg_type(
-    dynamic_shape_replacement_fn: DynamicShapeReplacementFn,
-    aval: ShapedAbstractValue,
-    shape: tuple[int, ...] | None = None,
-) -> ir.Type:
-  memory_space = None
-  if isinstance(aval, state.AbstractRef):
-    memory_space = _memory_space_to_tpu_memory_space(aval.memory_space)
-  return aval_to_ir_type(
-      dynamic_shape_replacement_fn, aval, shape=shape, memory_space=memory_space
-  )
-
-
 def _canonicalize_dimension_semantic(
     dimension_semantic: str | tpu_core.GridDimensionSemantics,
 ) -> str:
@@ -477,6 +483,7 @@ class MosaicGridMapping:
       dimension_semantics: Sequence[tpu_core.DimensionSemantics] | None,
       mesh: mesh_lib.Mesh | None,
       dynamic_shape_replacement_fn: DynamicShapeReplacementFn,
+      kernel_type: tpu_core.KernelType,
   ):
     self.grid = grid_mapping.grid
     self.grid_names = grid_mapping.grid_names
@@ -511,6 +518,10 @@ class MosaicGridMapping:
         for i in range(len(self.grid))
     )
 
+    _get_arg_type = functools.partial(
+        aval_to_ir_type, dynamic_shape_replacement_fn, kernel_type=kernel_type
+    )
+
     in_avals = [
         cast(ShapedAbstractValue, invar.aval) for invar in self.jaxpr.invars
     ]
@@ -519,8 +530,7 @@ class MosaicGridMapping:
     operand_avals = in_avals[grid_mapping.slice_block_ops]
     scratch_avals = in_avals[grid_mapping.slice_scratch_ops]
     self.scalar_prefetch_types = tuple(
-        _get_arg_type(dynamic_shape_replacement_fn, aval)
-        for aval in scalar_prefetch_avals
+        _get_arg_type(aval) for aval in scalar_prefetch_avals
     )
     scalar_prefetch_block_shapes = tuple(
         aval.shape for aval in scalar_prefetch_avals)
@@ -539,25 +549,18 @@ class MosaicGridMapping:
           for b in bm.block_shape
       )
       block_shape = _maybe_physicalize_block_shape(aval, block_shape)
-      operands_types.append(
-          _get_arg_type(dynamic_shape_replacement_fn, aval, shape=shape)
-      )
+      operands_types.append(_get_arg_type(aval, shape=shape))
       operand_block_shapes.append(block_shape)
     self.operand_types = tuple(operands_types)
     self.operand_block_shapes = tuple(operand_block_shapes)
-    self.scratch_types = tuple(
-        _get_arg_type(dynamic_shape_replacement_fn, aval)
-        for aval in scratch_avals
-    )
+    self.scratch_types = tuple(_get_arg_type(aval) for aval in scratch_avals)
     self.scratch_block_shapes = tuple(
         aval.shape if not isinstance(aval, tpu_core.AbstractSemaphore) else None
         for aval in scratch_avals
     )
-    self.grid_types = (
-        _get_arg_type(
-            dynamic_shape_replacement_fn, pallas_core.index_map_grid_aval
-        ),
-    ) * len(self.grid)
+    self.grid_types = (_get_arg_type(pallas_core.index_map_grid_aval),) * len(
+        self.grid
+    )
 
     self._prepare_mesh_info(mesh)
 
@@ -646,6 +649,7 @@ def _check_block_mappings(
     block_mappings: tuple[pallas_core.BlockMapping, ...],
     lowering_context: mlir.LoweringRuleContext,
     debug_info: jax_core.DebugInfo,
+    kernel_type: tpu_core.KernelType,
 ) -> None:
   del lowering_context  # originally needed for forward compat
   for bm in block_mappings:
@@ -665,7 +669,9 @@ def _check_block_mappings(
     rank = len(physical_block_shape)
     # TODO(necula): add tests for SMEM blocks with trivial windowing
     # We support scalars too
-    memory_space = _memory_space_to_tpu_memory_space(bm.block_aval.memory_space)
+    memory_space = _memory_space_to_tpu_memory_space(
+        bm.block_aval.memory_space, kernel_type
+    )
     if memory_space == tpu_core.MemorySpace.SMEM and bm.has_trivial_window():
       continue
     if memory_space == tpu_core.MemorySpace.SEMAPHORE:
@@ -807,7 +813,9 @@ def lower_jaxpr_into_module(
     dynamic_shape_replacement_fn = lambda x: x
 
   # Verify that we have legal block mappings to catch errors early.
-  _check_block_mappings(grid_mapping.block_mappings, lowering_context, debug_info)
+  _check_block_mappings(
+      grid_mapping.block_mappings, lowering_context, debug_info, kernel_type
+  )
 
   mosaic_grid_mapping = MosaicGridMapping(
       jaxpr,
@@ -815,6 +823,7 @@ def lower_jaxpr_into_module(
       dimension_semantics,
       mesh,
       dynamic_shape_replacement_fn,
+      kernel_type,
   )
   mosaic_grid_mapping.maybe_compress_grid()
   attrs = module.operation.attributes
@@ -848,7 +857,8 @@ def lower_jaxpr_into_module(
       func_name = f"transform_{i}"
       # ANY and SEMAPHORE operands don't support windowing and require empty window_params.
       tpu_memory_space = _memory_space_to_tpu_memory_space(
-          bm.block_aval.memory_space)
+          bm.block_aval.memory_space, kernel_type
+      )
       if (
           tpu_memory_space is ANY
           or tpu_memory_space == tpu_core.MemorySpace.HBM

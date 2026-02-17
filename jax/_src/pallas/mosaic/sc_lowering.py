@@ -147,7 +147,11 @@ def lower_jaxpr_into_module(
 
   backend = lowering_context.module_context.get_backend(optional=True)
   mosaic_grid_mapping = MosaicGridMapping(
-      jaxpr, grid_mapping, dimension_semantics, mesh=mesh
+      jaxpr,
+      grid_mapping,
+      dimension_semantics,
+      mesh=mesh,
+      kernel_type=kernel_type,
   )
   sym_tab = ir.SymbolTable(module.operation)
   func_op = lower_jaxpr_to_func(
@@ -207,6 +211,7 @@ class MosaicGridMapping(tc_lowering.MosaicGridMapping):
       grid_mapping: pallas_core.GridMapping,
       dimension_semantics: Sequence[tpu_core.DimensionSemantics] | None,
       mesh: mesh_lib.Mesh | None,
+      kernel_type: tpu_core.KernelType,
   ):
     for bm in grid_mapping.block_mappings:
       shape = pallas_core._get_block_shape(bm.block_shape)
@@ -230,6 +235,7 @@ class MosaicGridMapping(tc_lowering.MosaicGridMapping):
         dimension_semantics,
         mesh,
         dynamic_shape_replacement_fn=dynamic_shape_replacement_fn,
+        kernel_type=kernel_type,
     )
 
 
@@ -1008,7 +1014,8 @@ def _alloc_value(
         _dtype_to_ir_type(aval.dtype, is_kernel_boundary=True),
         layout=ir.Attribute.parse(f"#tpu.tiled<{tiling},{strides}>"),
         memory_space=tc_lowering._memory_space_to_mosaic_attribute(
-            aval.memory_space or MemorySpace.VMEM
+            aval.memory_space,
+            kernel_type=ctx.lowering_context.kernel_type,
         ),
     )
     return memref.alloca(out_type, [], [])
