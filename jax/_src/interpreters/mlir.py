@@ -91,7 +91,7 @@ def dense_int_elements(xs) -> ir.DenseIntElementsAttr:
 dense_int_array = ir.DenseI64ArrayAttr.get
 
 def dense_bool_elements(xs: Sequence[bool]) -> ir.DenseElementsAttr:
-  a = np.packbits(np.array(xs, np.bool_), bitorder='little')
+  a = np.array(xs, np.bool_)
   return ir.DenseElementsAttr.get(
       a, type=ir.IntegerType.get_signless(1), shape=[len(xs)])
 
@@ -268,8 +268,6 @@ def ir_constant(
 def _numpy_array_constant(x: np.ndarray | np.generic) -> IrValues:
   element_type = dtype_to_ir_type(x.dtype)
   shape = x.shape
-  if x.dtype == np.bool_:
-    x = np.packbits(x, bitorder='little')  # type: ignore
   x = np.ascontiguousarray(x)
   attr = ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
   return hlo.constant(attr)
@@ -367,8 +365,6 @@ def _numpy_scalar_attribute(val: Any) -> ir.Attribute:
 def _numpy_array_attribute(x: np.ndarray | np.generic) -> ir.Attribute:
   element_type = dtype_to_ir_type(x.dtype)
   shape = x.shape
-  if x.dtype == np.bool_:
-    x = np.packbits(x, bitorder='little')  # type: ignore
   x = np.ascontiguousarray(x)
   return ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
 

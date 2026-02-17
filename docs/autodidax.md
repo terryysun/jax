@@ -1610,7 +1610,7 @@ def _hlo_const(x: Any) -> ir.Value:
   a = np.asarray(x)
   if a.dtype == np.bool_:
     return hlo.constant(ir.DenseElementsAttr.get(
-      np.packbits(a, bitorder='little'), type=ir.IntegerType.get_signless(1),
+      np.array(a, np.bool_), type=ir.IntegerType.get_signless(1),
       shape=a.shape))
   else:
     return hlo.constant(ir.DenseElementsAttr.get(a))
