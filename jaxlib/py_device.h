@@ -37,8 +37,8 @@ class PyDevice {
  public:
   PyDevice(nb_class_ptr<PyClient> client, xla::ifrt::Device* device);
 
-  // Devices are compared using Python object identity, so we don't allow them
-  // to be copied or moved.
+  // Devices are compared by the underlying ifrt::Device* pointer via __eq__.
+  // We don't allow them to be copied or moved.
   PyDevice(const PyDevice&) = delete;
   PyDevice(PyDevice&&) = delete;
   PyDevice& operator=(const PyDevice&) = delete;

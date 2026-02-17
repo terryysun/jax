@@ -25,6 +25,7 @@ limitations under the License.
 #include <utility>
 #include <variant>
 
+#include "absl/hash/hash.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_join.h"
@@ -247,6 +248,16 @@ PyType_Slot PyDevice::slots_[] = {
           "platforms.")
       .def("__str__", &PyDevice::Str)
       .def("__repr__", &PyDevice::Repr)
+      .def("__eq__",
+           [](const PyDevice& self, nb::object other) {
+             if (!nb::isinstance<PyDevice>(other)) return false;
+             return self.device() == nb::cast<const PyDevice*>(other)->device();
+           },
+           nb::is_operator())
+      .def("__hash__",
+           [](const PyDevice& self) {
+             return absl::HashOf(self.device());
+           })
       .def("memory", xla::ValueOrThrowWrapper(&PyDevice::Memory),
            nb::arg("kind"))
       .def("default_memory", xla::ValueOrThrowWrapper(&PyDevice::DefaultMemory),

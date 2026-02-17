@@ -22,6 +22,7 @@ import jax.numpy as jnp
 from jax import lax
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 from jax._src import test_util as jtu
+from jax._src.lib import jaxlib_extension_version
 
 jax.config.parse_flags_with_absl()
 jtu.request_cpu_devices(8)
@@ -249,6 +250,53 @@ class MultiDeviceTest(jtu.JaxTestCase):
     y, x_bar = jax.value_and_grad(lambda x: jax.device_put(x, devices[1]))(x)
     self.assert_committed_to_device(y, devices[1])
     self.assert_committed_to_device(x_bar, devices[0])
+
+  def test_device_equality(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    devices1 = jax.devices()
+    devices2 = jax.devices()
+    for d1, d2 in zip(devices1, devices2):
+      self.assertEqual(d1, d2)
+
+  def test_device_inequality(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    devices = self.get_devices()
+    self.assertNotEqual(devices[0], devices[1])
+
+  def test_device_equality_with_non_device(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    device = jax.devices()[0]
+    self.assertNotEqual(device, 0)
+    self.assertNotEqual(device, "cpu")
+    self.assertNotEqual(device, None)
+
+  def test_device_hash(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    devices1 = jax.devices()
+    devices2 = jax.devices()
+    for d1, d2 in zip(devices1, devices2):
+      self.assertEqual(hash(d1), hash(d2))
+
+  def test_device_in_set(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    devices = jax.devices()
+    device_set = set(devices)
+    self.assertEqual(len(device_set), len(devices))
+    for d in jax.devices():
+      self.assertIn(d, device_set)
+
+  def test_device_as_dict_key(self):
+    if jaxlib_extension_version < 408:
+      self.skipTest("Requires jaxlib_extension_version >= 408")
+    devices = jax.devices()
+    device_dict = {d: i for i, d in enumerate(devices)}
+    for i, d in enumerate(jax.devices()):
+      self.assertEqual(device_dict[d], i)
 
   def test_lax_full_sharding(self):
     devices = jax.devices()
