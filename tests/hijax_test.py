@@ -1144,6 +1144,12 @@ class BoxTest(jtu.JaxTestCase):
 
     f(Box(val1))
 
+  def test_qdd_vmap(self):
+    # https://github.com/jax-ml/jax/issues/34758
+    def f():
+      return Box(jnp.array(0)).get()
+    jax.vmap(f, axis_size=2)()  # don't crash
+
   def test_jit_internal(self):
     @jax.jit
     def f(x):

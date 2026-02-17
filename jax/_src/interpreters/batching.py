@@ -241,6 +241,11 @@ class BatchTrace(Trace):
     else:
       return val, not_mapped
 
+  def cur_qdd(self, x):
+    val, _ = self.to_batch_info(x)
+    with core.set_current_trace(self.parent_trace):
+      return core.cur_qdd(val)
+
   def process_primitive(self, p, tracers, params):
     vals_in, dims_in = unzip2(map(self.to_batch_info, tracers))
     args_not_mapped = all(bdim is not_mapped for bdim in dims_in)
