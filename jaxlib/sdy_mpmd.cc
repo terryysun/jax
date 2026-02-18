@@ -482,14 +482,13 @@ NB_MODULE(_sdy_mpmd, m) {
   mpmd_executable.def(
       "hlo_modules",
       [](PyMpmdLoadedExecutable& exec)
-          -> absl::StatusOr<
-              absl::flat_hash_map<std::string, std::vector<nb::object>>> {
+          -> absl::flat_hash_map<std::string, std::vector<nb::object>> {
         absl::flat_hash_map<std::string,
                             std::vector<std::shared_ptr<xla::HloModule>>>
             hlo_modules;
         {
           nb::gil_scoped_release gil;
-          TF_ASSIGN_OR_RETURN(hlo_modules, exec.GetHloModules());
+          hlo_modules = xla::ValueOrThrow(exec.GetHloModules());
         }
         absl::flat_hash_map<std::string, std::vector<nb::object>>
             py_hlo_modules;
