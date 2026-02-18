@@ -90,11 +90,6 @@ def dense_int_elements(xs) -> ir.DenseIntElementsAttr:
 
 dense_int_array = ir.DenseI64ArrayAttr.get
 
-def dense_bool_elements(xs: Sequence[bool]) -> ir.DenseElementsAttr:
-  a = np.array(xs, np.bool_)
-  return ir.DenseElementsAttr.get(
-      a, type=ir.IntegerType.get_signless(1), shape=[len(xs)])
-
 def i32_attr(i): return ir.IntegerAttr.get(ir.IntegerType.get_signless(32), i)
 def i64_attr(i): return ir.IntegerAttr.get(ir.IntegerType.get_signless(64), i)
 
@@ -266,11 +261,7 @@ def ir_constant(
   raise TypeError(f"No constant handler for type: {type(val)}")
 
 def _numpy_array_constant(x: np.ndarray | np.generic) -> IrValues:
-  element_type = dtype_to_ir_type(x.dtype)
-  shape = x.shape
-  x = np.ascontiguousarray(x)
-  attr = ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
-  return hlo.constant(attr)
+  return hlo.constant(_numpy_array_attribute(x))
 
 
 def _masked_array_constant_handler(*args, **kwargs):
@@ -366,7 +357,15 @@ def _numpy_array_attribute(x: np.ndarray | np.generic) -> ir.Attribute:
   element_type = dtype_to_ir_type(x.dtype)
   shape = x.shape
   x = np.ascontiguousarray(x)
-  return ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
+  try:
+    return ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
+  except ValueError:
+    # Backwards compatibility fallback for old MLIR versions.
+    # Delete once minimum supported jaxlib version is 0.9.1.
+    if x.dtype != np.bool_:
+      raise
+    x = np.ascontiguousarray(np.packbits(x, bitorder='little'))
+    return ir.DenseElementsAttr.get(x, type=element_type, shape=shape)  # type: ignore
 
 def _numpy_array_attribute_handler(val: np.ndarray | np.generic) -> ir.Attribute:
   if 0 in val.strides and val.size > 0:
