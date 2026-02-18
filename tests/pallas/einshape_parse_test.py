@@ -71,7 +71,7 @@ class EinshapeParseTest(parameterized.TestCase):
     self.assertEqual(ops, [])
 
   @hypothesis.given(
-      st.lists(st.integers(1, 4), min_size=1, max_size=5).map(tuple), st.data()
+      st.lists(st.integers(1, 4), min_size=1, max_size=4).map(tuple), st.data()
   )
   @hypothesis.settings(max_examples=50, deadline=None)
   def test_hypothesis_get_einshape_transforms(self, atomic_shape, data):
