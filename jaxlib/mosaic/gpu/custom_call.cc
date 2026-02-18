@@ -57,11 +57,25 @@ limitations under the License.
 #include "third_party/gpus/cuda/include/driver_types.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/MemoryBufferRef.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/Host.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ComplexToLLVM/ComplexToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
@@ -104,6 +118,7 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/GPU/GPUToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/Passes.h"
 #include "jaxlib/gpu/vendor.h"
 #include "jaxlib/mosaic/dialect/gpu/mosaic_gpu.h"
@@ -147,8 +162,8 @@ using ::mosaic::gpu::NvshmemApi;
 namespace ffi = xla::ffi;
 namespace se = stream_executor;
 
-using MosaicInitFunc = void(void****);
-using MosaicHostFunc = void(void**);
+using MosaicInitFunc = void(void**, void**);
+using MosaicHostFunc = void(void*, void*, void**);
 
 // Mirrors `--xla_gpu_cuda_data_dir`'s default value.
 constexpr std::string_view kDefaultCudaDataDir = "./cuda_sdk_lib";
@@ -446,10 +461,10 @@ absl::StatusOr<std::pair<std::string, std::string>> GetHostAndInitFuncNames(
 }
 
 struct CompiledKernel {
-  CompiledKernel(std::unique_ptr<mlir::ExecutionEngine> engine,
+  CompiledKernel(std::unique_ptr<llvm::orc::LLJIT> lljit,
                  MosaicHostFunc* host_launch, MosaicInitFunc* init,
                  bool is_comm_used)
-      : engine(std::move(engine)),
+      : lljit(std::move(lljit)),
         host_launch(host_launch),
         init(init),
         is_comm_used(is_comm_used) {}
@@ -459,11 +474,234 @@ struct CompiledKernel {
   CompiledKernel(const CompiledKernel&) = delete;
   CompiledKernel(CompiledKernel&& other) = delete;
 
-  std::unique_ptr<mlir::ExecutionEngine> engine;
+  std::unique_ptr<llvm::orc::LLJIT> lljit;
   MosaicHostFunc* host_launch = nullptr;
   MosaicInitFunc* init = nullptr;
   bool is_comm_used = false;
 };
+
+absl::Status RunMlirPasses(mlir::ModuleOp module,
+                           std::optional<se::CudaComputeCapability> cc,
+                           bool is_comm_used,
+                           const mosaic::gpu::DumpOptions& dump_opts) {
+  TF_ASSIGN_OR_RETURN(se::cuda::CompilationProvider * compilation_provider,
+                      GetAssemblyToBinaryCompilationProvider());
+  if (!cc.has_value()) {
+    TF_ASSIGN_OR_RETURN(cc, GetCudaComputeCapability());
+  }
+  TF_ASSIGN_OR_RETURN(std::string sm,
+                      mosaic::gpu::GetSmVersion(cc->major, cc->minor));
+  // Here, it is important to use a PTX ISA version that is supported by both
+  // the underlying compilation provider, and by LLVM. Using a version that is
+  // newer than what LLVM supports will lead to the indication being ignored by
+  // LLVM (potentially causing a version downgrade), while using a version that
+  // is newer than what the compilation provider supports will lead to LLVM
+  // potentially generating PTX that the compilation provider cannot handle.
+  TF_ASSIGN_OR_RETURN(std::string llvm_ptx_isa,
+                      GetPtxIsaVersion(*compilation_provider));
+  std::string nvshmem_path = "";
+  if (is_comm_used) {
+    TF_ASSIGN_OR_RETURN(nvshmem_path, get_nvshmem_llvm_lib_path());
+  }
+  // nvbug/5809460: spurious LLVM/MLIR errors with tcgen05+sm_103a; disable
+  // verification on sm_103a, sm_110a etc. where we see spurious failures.
+  bool verify_target = !((cc->major == 10 && cc->minor > 0) || cc->major == 11);
+  auto passes = GetPassPipeline(module.getContext(), compilation_provider, *cc,
+                                sm, llvm_ptx_isa, nvshmem_path, verify_target);
+  if (mlir::failed(passes)) {
+    return absl::InternalError("Failed to construct pass pipeline");
+  }
+  if (RunPasses(std::move(*passes), module, dump_opts).failed()) {
+    return absl::InternalError("Pass pipeline failed");
+  }
+  return absl::OkStatus();
+}
+
+// This function was inspired by mlir::ExecutionEngine::create. It takes an MLIR
+// module, compiles the module to LLVM IR, optimizes it using LLVM, and returns
+// the compiled object file.
+absl::StatusOr<std::unique_ptr<llvm::MemoryBuffer>> CompileModuleToObject(
+    mlir::ModuleOp module, const mosaic::gpu::DumpOptions& dump_opts) {
+  llvm::LLVMContext llvm_context;
+  auto llvm_module = mlir::translateModuleToLLVMIR(module, llvm_context);
+  if (!llvm_module) {
+    return absl::InternalError("Failed to translate module to LLVM IR");
+  }
+
+  auto tm_builder_or_error = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!tm_builder_or_error) {
+    return absl::InternalError(
+        absl::StrFormat("Failed to detect host: %s",
+                        llvm::toString(tm_builder_or_error.takeError())));
+  }
+  tm_builder_or_error->setCodeGenOptLevel(llvm::CodeGenOptLevel::Aggressive);
+
+  auto tm_or_error = tm_builder_or_error->createTargetMachine();
+  if (!tm_or_error) {
+    return absl::InternalError(
+        absl::StrFormat("Failed to create target machine: %s",
+                        llvm::toString(tm_or_error.takeError())));
+  }
+  std::unique_ptr<llvm::TargetMachine> target_machine =
+      std::move(tm_or_error.get());
+
+  mlir::ExecutionEngine::setupTargetTripleAndDataLayout(llvm_module.get(),
+                                                        target_machine.get());
+
+  if (getenv("MOSAIC_GPU_DUMP_HOST_LLVM")) {
+    std::string ll_str;
+    llvm::raw_string_ostream os(ll_str);
+    llvm_module->print(os, nullptr);
+    os.flush();
+    mosaic::gpu::DumpToFileOrStdout(ll_str, dump_opts.module_basename + ".ll",
+                                    dump_opts.dump_path);
+  }
+
+  auto transformer = mlir::makeOptimizingTransformer(
+      /*optLevel=*/3, /*sizeLevel=*/0, /*targetMachine=*/target_machine.get());
+  if (auto err = transformer(llvm_module.get())) {
+    return absl::InternalError(absl::StrFormat("Transformer failed: %s",
+                                               llvm::toString(std::move(err))));
+  }
+
+  std::string result;
+  llvm::raw_string_ostream stream(result);
+  {
+    llvm::buffer_ostream bstream(stream);
+    llvm::legacy::PassManager codegen_pm;
+    if (target_machine->addPassesToEmitFile(
+            codegen_pm, bstream, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+      return absl::InternalError(
+          "TargetMachine can't emit a file of this type");
+    }
+    codegen_pm.run(*llvm_module);
+  }
+
+  return llvm::MemoryBuffer::getMemBufferCopy(result, "kernel");
+}
+
+absl::StatusOr<std::unique_ptr<CompiledKernel>> CreateAndInitJIT(
+    std::unique_ptr<llvm::MemoryBuffer> object_file, mlir::ModuleOp module,
+    bool is_comm_used) {
+  auto lljit_builder = llvm::orc::LLJITBuilder();
+
+  auto tm_builder_or_error = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!tm_builder_or_error) {
+    return absl::InternalError(
+        absl::StrFormat("Failed to detect host: %s",
+                        llvm::toString(tm_builder_or_error.takeError())));
+  }
+  char global_prefix =
+      llvm::DataLayout(
+          tm_builder_or_error->getTargetTriple().computeDataLayout())
+          .getGlobalPrefix();
+
+  lljit_builder.setObjectLinkingLayerCreator(
+      [global_prefix](llvm::orc::ExecutionSession& session)
+          -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
+        auto objectLayer =
+            std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(
+                session, [](llvm::MemoryBufferRef) {
+                  return std::make_unique<llvm::SectionMemoryManager>();
+                });
+
+        llvm::SmallVector<llvm::StringRef> runtime_libs;
+        if (const char* runtime_lib_path =
+                getenv("MOSAIC_GPU_RUNTIME_LIB_PATH")) {
+          runtime_libs.emplace_back(runtime_lib_path);
+        }
+        if (const char* nvshmem_path = getenv("MOSAIC_GPU_NVSHMEM_SO_PATH")) {
+          runtime_libs.emplace_back(nvshmem_path);
+        }
+
+        for (const auto& lib : runtime_libs) {
+          llvm::SmallString<128> abs_lib_path(lib);
+          if (std::error_code ec = llvm::sys::fs::make_absolute(abs_lib_path)) {
+            return llvm::make_error<llvm::StringError>(
+                absl::StrFormat("Failed to get absolute path for %s: %s",
+                                std::string_view(lib.data(), lib.size()),
+                                ec.message()),
+                llvm::inconvertibleErrorCode());
+          }
+
+          // inspired by mlir::ExecutionEngine::create
+          auto mb = llvm::MemoryBuffer::getFile(abs_lib_path);
+          if (!mb) {
+            return llvm::make_error<llvm::StringError>(
+                absl::StrFormat("Failed to create MemoryBuffer for: %s: %s",
+                                abs_lib_path.c_str(), mb.getError().message()),
+                llvm::inconvertibleErrorCode());
+          }
+
+          auto& jd = session.createBareJITDylib(std::string(abs_lib_path));
+          auto loaded = llvm::orc::DynamicLibrarySearchGenerator::Load(
+              abs_lib_path.c_str(), global_prefix);
+          if (!loaded) {
+            return loaded.takeError();
+          }
+          jd.addGenerator(std::move(*loaded));
+
+          if (auto err = objectLayer->add(jd, std::move(mb.get()))) {
+            return std::move(err);
+          }
+        }
+
+        return objectLayer;
+      });
+
+  auto lljit_or_error = lljit_builder.create();
+  if (auto err = lljit_or_error.takeError()) {
+    return absl::InternalError(absl::StrFormat("Failed to create LLJIT: %s",
+                                               llvm::toString(std::move(err))));
+  }
+  std::unique_ptr<llvm::orc::LLJIT> lljit = std::move(*lljit_or_error);
+
+  // Resolve symbols that are linked in the current process. This is necessary
+  // to find the host and init functions and resolve all library calls.
+  {
+    auto& main_jd = lljit->getMainJITDylib();
+    auto generator_or_error =
+        llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+            global_prefix);
+    if (auto err = generator_or_error.takeError()) {
+      return absl::InternalError(absl::StrFormat(
+          "Failed to create generator: %s", llvm::toString(std::move(err))));
+    }
+    main_jd.addGenerator(std::move(*generator_or_error));
+  }
+
+  // This is the actual linking step. Returns an error if it fails to resolve
+  // all symbols from the object file.
+  if (auto err = lljit->addObjectFile(std::move(object_file))) {
+    return absl::InternalError(absl::StrFormat("Failed to add object file: %s",
+                                               llvm::toString(std::move(err))));
+  }
+
+  // Run all the static initializers in the object file if there are any.
+  if (auto err = lljit->initialize(lljit->getMainJITDylib())) {
+    return absl::InternalError(absl::StrFormat("Failed to initialize LLJIT: %s",
+                                               llvm::toString(std::move(err))));
+  }
+
+  TF_ASSIGN_OR_RETURN(auto host_and_init_func_names,
+                      GetHostAndInitFuncNames(module));
+  auto host_sym = lljit->lookup(host_and_init_func_names.first);
+  if (auto err = host_sym.takeError()) {
+    return absl::InternalError(absl::StrFormat(
+        "Failed to lookup host symbol: %s", llvm::toString(std::move(err))));
+  }
+
+  auto init_sym = lljit->lookup(host_and_init_func_names.second);
+  if (auto err = init_sym.takeError()) {
+    return absl::InternalError(absl::StrFormat(
+        "Failed to lookup init symbol: %s", llvm::toString(std::move(err))));
+  }
+
+  VLOG(5) << "Successfully compiled Mosaic GPU kernel";
+  return std::make_unique<CompiledKernel>(
+      std::move(lljit), host_sym->toPtr<MosaicHostFunc*>(),
+      init_sym->toPtr<MosaicInitFunc*>(), is_comm_used);
+}
 
 // TODO(b/464203195): Require a compute capability to be passed in.
 absl::StatusOr<std::unique_ptr<CompiledKernel>> Compile(
@@ -485,27 +723,6 @@ absl::StatusOr<std::unique_ptr<CompiledKernel>> Compile(
     return absl::InternalError("Failed to deserialize Mosaic GPU module");
   }
 
-  mosaic::gpu::EnsureLLVMNVPTXTargetIsRegistered();
-  TF_ASSIGN_OR_RETURN(se::cuda::CompilationProvider * compilation_provider,
-                      GetAssemblyToBinaryCompilationProvider());
-  if (!cc.has_value()) {
-    TF_ASSIGN_OR_RETURN(cc, GetCudaComputeCapability());
-  }
-  TF_ASSIGN_OR_RETURN(std::string sm,
-                      mosaic::gpu::GetSmVersion(cc->major, cc->minor));
-  // Here, it is important to use a PTX ISA version that is supported by both
-  // the underlying compilation provider, and by LLVM. Using a version that is
-  // newer than what LLVM supports will lead to the indication being ignored by
-  // LLVM (potentially causing a version downgrade), while using a version that
-  // is newer than what the compilation provider supports will lead to LLVM
-  // potentially generating PTX that the compilation provider cannot handle.
-  TF_ASSIGN_OR_RETURN(std::string llvm_ptx_isa,
-                      GetPtxIsaVersion(*compilation_provider));
-  bool is_comm_used = is_nvshmem_used(*module);
-  std::string nvshmem_path = "";
-  if (is_comm_used) {
-    TF_ASSIGN_OR_RETURN(nvshmem_path, get_nvshmem_llvm_lib_path());
-  }
   const char* dump_llvm = getenv("MOSAIC_GPU_DUMP_LLVM");
   const char* llvm_debug_only = getenv("MOSAIC_GPU_LLVM_DEBUG_ONLY");
 #ifndef NDEBUG
@@ -537,9 +754,7 @@ absl::StatusOr<std::unique_ptr<CompiledKernel>> Compile(
     abort();
   }
 #endif
-  // nvbug/5809460: spurious LLVM/MLIR errors with tcgen05+sm_103a; disable
-  // verification on sm_103a, sm_110a etc. where we see spurious failures.
-  bool verify_target = !((cc->major == 10 && cc->minor > 0) || cc->major == 11);
+
   // Use `div.full` for float32 division---this generates better SASS.
   const std::vector<std::string> llvm_cl_options{"-nvptx-prec-divf32=1"};
   // Acquire a lock over the LLVM command line options here. XLA uses this
@@ -548,63 +763,23 @@ absl::StatusOr<std::unique_ptr<CompiledKernel>> Compile(
   // setting our own command line options makes compilation dependent on
   // outside state/non-deterministic.
   xla::llvm_ir::LLVMCommandLineOptionsLock llvm_lock(llvm_cl_options);
-  auto passes = GetPassPipeline(module->getContext(), compilation_provider, *cc,
-                                sm, llvm_ptx_isa, nvshmem_path, verify_target);
-  if (mlir::failed(passes)) {
-    return absl::InternalError("Failed to construct pass pipeline");
-  }
+  mosaic::gpu::EnsureLLVMNVPTXTargetIsRegistered();
+
+  bool is_comm_used = is_nvshmem_used(*module);
   mosaic::gpu::DumpOptions dump_opts =
       mosaic::gpu::GetOrSetDumpOptionsForModule(*module);
-  if (RunPasses(std::move(*passes), *module, dump_opts).failed()) {
-    return absl::InternalError("Pass pipeline failed");
-  }
-  llvm::SmallVector<llvm::StringRef> runtime_libs;
-  if (const char* runtime_lib_path = getenv("MOSAIC_GPU_RUNTIME_LIB_PATH")) {
-    runtime_libs.emplace_back(runtime_lib_path);
-  }
-  if (const char* nvshmem_path = getenv("MOSAIC_GPU_NVSHMEM_SO_PATH")) {
-    runtime_libs.emplace_back(nvshmem_path);
-  }
-  // Create a transformer to run all LLVM optimization passes at the
-  // specified optimization level.
-  std::function<llvm::Error(llvm::Module*)> transformer =
-      [dump_opts](llvm::Module* module) {
-        if (getenv("MOSAIC_GPU_DUMP_HOST_LLVM")) {
-          std::string ll_str;
-          llvm::raw_string_ostream os(ll_str);
-          module->print(os, nullptr);
-          os.flush();
-          mosaic::gpu::DumpToFileOrStdout(
-              ll_str, dump_opts.module_basename + ".ll", dump_opts.dump_path);
-        }
-        return mlir::makeOptimizingTransformer(
-            /*optLevel=*/3, /*sizeLevel=*/0, /*targetMachine=*/nullptr)(module);
-      };
-  mlir::ExecutionEngineOptions options;
-  options.transformer = transformer;
-  options.jitCodeGenOptLevel = llvm::CodeGenOptLevel::Aggressive;
-  options.sharedLibPaths = runtime_libs;
-  llvm::Expected<std::unique_ptr<mlir::ExecutionEngine>> engine =
-      mlir::ExecutionEngine::create(*module, options);
+  TF_RETURN_IF_ERROR(RunMlirPasses(*module, cc, is_comm_used, dump_opts));
+
+  TF_ASSIGN_OR_RETURN(auto object_file,
+                      CompileModuleToObject(*module, dump_opts));
+
 #ifndef NDEBUG
   if (llvm_debug_only || dump_llvm) {
     llvm::DebugFlag = old_debug_state;
   }
 #endif
-  if (!engine) {
-    return absl::InternalError("Failed to compile kernel");
-  }
-  TF_ASSIGN_OR_RETURN(auto host_and_init_func_names,
-                      GetHostAndInitFuncNames(*module));
-  auto host = (*engine)->lookupPacked(host_and_init_func_names.first);
-  auto init = (*engine)->lookupPacked(host_and_init_func_names.second);
-  if (!init || !host) {
-    return absl::InternalError("Failed to retrieve kernel function");
-  }
-  VLOG(5) << "Successfully compiled Mosaic GPU kernel";
-  return std::make_unique<CompiledKernel>(
-      std::move(*engine), reinterpret_cast<MosaicHostFunc*>(*host),
-      reinterpret_cast<MosaicInitFunc*>(*init), is_comm_used);
+
+  return CreateAndInitJIT(std::move(object_file), *module, is_comm_used);
 }
 
 using KernelHash = std::array<uint64_t, 4>;
@@ -637,10 +812,7 @@ absl::StatusOr<void*> InitKernel(const CompiledKernel& kernel) {
   }
   void* module_ptr = nullptr;
   void* kernel_ptr = nullptr;
-  void** module_ptr_ptr = &module_ptr;
-  void** kernel_ptr_ptr = &kernel_ptr;
-  void*** init_args[2] = {&module_ptr_ptr, &kernel_ptr_ptr};
-  kernel.init(init_args);
+  kernel.init(&module_ptr, &kernel_ptr);
   VLOG(5) << "Successfully initialized Mosaic GPU kernel";
   return kernel_ptr;
 }
@@ -675,8 +847,7 @@ absl::Status LegacyCustomCall(cudaStream_t stream, void** buffers,
   if (kernel->is_comm_used) {
     NvshmemApi::Default().barrier_all_on_stream(stream);
   }
-  void* args[4] = {&ctx, &stream, &buffers};
-  kernel->host_launch(args);
+  kernel->host_launch(ctx, stream, buffers);
   return absl::OkStatus();
 }
 
@@ -851,17 +1022,16 @@ absl::StatusOr<std::vector<char>> CreateCollectiveMetadata(
     std::vector<se::DeviceAddressBase> parameters) {
   TF_ASSIGN_OR_RETURN(
       std::vector<void*> param_to_peers,
-      xla::gpu::CollectParamToPeers(
-          clique_key, current_rank, stream, std::move(parameters)));
+      xla::gpu::CollectParamToPeers(clique_key, current_rank, stream,
+                                    std::move(parameters)));
   CollectiveKernelMetadata metadata;
   metadata.rank = current_rank.value();
 
   // TODO(b/476264413): Support multimem.
   std::vector<void*> param_to_multimem;
-  TF_RETURN_IF_ERROR(
-      xla::gpu::CopyCollectiveMetadataToDevice(
-          stream, metadata, param_to_peers, param_to_multimem,
-          collective_metadata_ptr));
+  TF_RETURN_IF_ERROR(xla::gpu::CopyCollectiveMetadataToDevice(
+      stream, metadata, param_to_peers, param_to_multimem,
+      collective_metadata_ptr));
 
   // Copy the metadata and param to peers array to the CPU RAM for the TMA
   // initialization.
@@ -952,8 +1122,7 @@ absl::Status MosaicGpuExecute(
     NvshmemApi::Default().barrier_all_on_stream(stream);
   }
   void** buffers_data = buffer_ptrs.data();
-  void* args[4] = {&ctx, &stream, &buffers_data};
-  kernel->host_launch(args);
+  kernel->host_launch(ctx, stream, buffers_data);
   return absl::OkStatus();
 }
 
