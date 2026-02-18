@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 import dataclasses
 import json
-from typing import cast
+from typing import Any, cast
 
 import jax
 from jax import dtypes
@@ -400,5 +400,127 @@ def pallas_call_tpu_lowering_rule(
       effects=jaxpr.effects,
       metadata=metadata,
       name=name or debug_info.func_name,
+      jax_mesh=jax_mesh,
+  )
+
+
+def mpmd_map_tpu_lowering_rule(
+    ctx: mlir.LoweringRuleContext,
+    *in_nodes,
+    meshes,
+    jaxprs,
+    grid_mappings,
+    out_avals,
+    input_output_aliases,
+    compiler_params,
+    interpret,
+    debug,
+    cost_estimate,
+    metadata,
+    name,
+):
+  del interpret  # Unused.
+
+  if debug:
+    for idx, jaxpr in enumerate(jaxprs):
+      print(
+          f"\nThe kernel jaxpr {idx=} for mpmd_map"
+          f" {jaxpr.debug_info.func_src_info}:"
+      )
+      print(jaxpr)
+
+  if compiler_params is None:
+    mosaic_params = tpu_core.CompilerParams()
+  else:
+    assert isinstance(compiler_params, tpu_core.CompilerParams)
+    mosaic_params = compiler_params  # type: ignore[assignment]
+
+  # TODO(slebedev): Check kernel type and raise if it is set.
+  if mosaic_params.dimension_semantics is not None:
+    raise ValueError(
+        "mpmd_map does not support dimension_semantics= in compiler_params="
+    )
+
+  jax_mesh = None
+  axis_context = ctx.module_context.axis_context
+  if axis_context is not None:
+    if isinstance(axis_context, sharding_impls.SPMDAxisContext):
+      jax_mesh = axis_context.mesh
+  mlir_ctx = mlir.JaxIrContext()
+  mlir_ctx.append_dialect_registry(mlir.upstream_dialects)
+  mlir_ctx.load_all_available_dialects()
+  tpu.register_dialect(mlir_ctx)
+
+  with mlir_ctx, ir.Location.unknown(mlir_ctx):
+    mosaic_module = ir.Module.create()
+    for mesh, jaxpr, grid_mapping in zip(
+        meshes, jaxprs, grid_mappings, strict=True
+    ):
+      if (
+          not hasattr(mesh, "kernel_type") or
+          not hasattr(mesh, "dimension_semantics")
+      ):
+        raise ValueError(
+            "mpmd_map requires the mesh to define its ``kernel_type`` and"
+            " ``dimension_semantics``"
+        )
+
+      match kernel_type := mesh.kernel_type:
+        case tpu_core.KernelType.TC:
+          lower_jaxpr_into_module = lowering.lower_jaxpr_into_module
+        case (
+            tpu_core.KernelType.SC_SCALAR_SUBCORE
+            | tpu_core.KernelType.SC_VECTOR_SUBCORE
+        ):
+          lower_jaxpr_into_module = sc_lowering.lower_jaxpr_into_module
+        case _:
+          raise ValueError(
+              f"Unsupported kernel type: {mosaic_params.kernel_type}"
+          )
+
+      lower_jaxpr_into_module(
+          ctx,
+          mosaic_module,
+          grid_mapping,
+          jaxpr,
+          dimension_semantics=mesh.dimension_semantics,
+          kernel_type=kernel_type,
+          mesh=jax_mesh,
+          name=mlir.sanitize_name(jaxpr.debug_info.func_name),
+          dynamic_shape_replacement_enabled=pallas_core.dynamic_shapes_export_enabled(),
+      )
+
+  if debug:
+    pm = passmanager.PassManager.parse("builtin.module(canonicalize)", mlir_ctx)
+    pm.run(mosaic_module.operation)
+    print("\nThe Mosaic module for mpmd_map:")
+    print(mosaic_module)
+
+  if name is None:
+    name = "_".join(jaxpr.debug_info.func_name for jaxpr in jaxprs)
+
+  match [*{mesh.kernel_type for mesh in meshes}]:
+    case [kernel_type]:
+      mosaic_params = dataclasses.replace(mosaic_params, kernel_type=kernel_type)
+    case _:
+      # Use a stub ``kernel_type`` if we are lowering multiple kernels.
+      # This will hopefully cause a runtime error if ``kernel_type`` is ever
+      # accessed.
+      mosaic_params = dataclasses.replace(
+          mosaic_params, kernel_type=cast(Any, object())
+      )
+
+  return _lower_to_custom_call(
+      ctx,
+      *in_nodes,
+      mosaic_module=mosaic_module,
+      mosaic_params=mosaic_params,
+      num_dynamic_grid_bounds=0,
+      input_output_aliases=tuple(input_output_aliases.items()),
+      cost_estimate=cost_estimate,
+      out_avals=out_avals,
+      effects=set().union(*(jaxpr.effects for jaxpr in jaxprs)),
+      metadata=metadata,
+      name=name,
       jax_mesh=jax_mesh,
   )

@@ -286,12 +286,20 @@ class TensorCoreMesh:
     )
 
   @property
+  def kernel_type(self) -> KernelType:
+    return KernelType.TC
+
+  @property
   def default_memory_space(self) -> pallas_core.MemorySpace:
     return pallas_core.MemorySpace.ANY
 
   @property
   def shape(self):
     return collections.OrderedDict(zip(self.axis_names, self.devices.shape))
+
+  @property
+  def dimension_semantics(self) -> Sequence[str]:
+    return ["parallel"]
 
   def discharges_effect(self, effect: jax_core.Effect) -> Literal[False]:
     del effect
@@ -411,9 +419,7 @@ def _tensorcore_mesh_discharge_rule(
       *args,
       jaxpr=jaxpr,
       mesh=mesh,
-      compiler_params=compiler_params.replace(
-          dimension_semantics=(PARALLEL,)
-      ),
+      compiler_params=compiler_params,
       debug=debug,
       interpret=interpret,
       cost_estimate=cost_estimate,

@@ -25,6 +25,7 @@ import hypothesis.strategies as hps
 import jax
 from jax import lax
 from jax._src import test_util as jtu
+from jax._src.pallas import mpmd
 from jax._src.pallas.mosaic import sc_core
 from jax._src.state import discharge as state_discharge
 from jax.experimental import pallas as pl
@@ -2059,6 +2060,50 @@ class ScalarSubcoreTest(PallasSCTest):
 
 class ScalarSubcoreTestWithTCTiling(ScalarSubcoreTest):
   USE_TC_TILING = True
+
+
+class MpmdMapTest(PallasSCTest):
+
+  def setUp(self):
+    if not jtu.is_cloud_tpu_at_least(2026, 2, 21):
+      self.skipTest("Requires a newer libtpu")
+
+    super().setUp()
+
+  def test_parallel_subkernels(self):
+    v_mesh = plsc.VectorSubcoreMesh(
+        core_axis_name="core",
+        subcore_axis_name="subcore",
+        num_cores=self.sc_info.num_cores,
+    )
+    s_mesh = plsc.ScalarSubcoreMesh(
+        axis_name="scs_core", num_cores=self.sc_info.num_cores
+    )
+
+    x = jnp.arange(self.sc_info.num_cores * self.num_lanes, dtype=jnp.int32)
+
+    def vector_subcore_fn(x_hbm_ref, out_hbm_ref):
+      scratch_ref = jax.empty_ref(jax.typeof(x), memory_space=pltpu.VMEM)
+      pltpu.sync_copy(x_hbm_ref, scratch_ref)
+      scratch_ref[...] += 2 * scratch_ref[...]
+      pltpu.sync_copy(scratch_ref, out_hbm_ref.at[:x.size])
+
+    def scalar_subcore_fn(x_hbm_ref, out_hbm_ref):
+      scratch_ref = jax.empty_ref(jax.typeof(x), memory_space=pltpu.SMEM)
+      pltpu.sync_copy(x_hbm_ref, scratch_ref)
+
+      @pl.loop(0, x.size)
+      def _(i):
+        scratch_ref[i] += 3 * scratch_ref[i]
+
+      pltpu.sync_copy(scratch_ref, out_hbm_ref.at[x.size:])
+
+    out = mpmd.mpmd_map(
+        [(v_mesh, vector_subcore_fn), (s_mesh, scalar_subcore_fn)],
+        out_shapes=jax.ShapeDtypeStruct([x.size * 2], x.dtype),
+    )(x)
+    np.testing.assert_array_equal(out[:x.size], x + 2 * x)
+    np.testing.assert_array_equal(out[x.size:], x + 3 * x)
 
 
 class PipelineTest(PallasSCTest):

@@ -161,12 +161,20 @@ class ScalarSubcoreMesh:
   num_cores: int
 
   @property
+  def kernel_type(self) -> tpu_core.KernelType:
+    return tpu_core.KernelType.SC_SCALAR_SUBCORE
+
+  @property
   def default_memory_space(self) -> tpu_core.MemorySpace:
     return tpu_core.MemorySpace.HBM
 
   @property
   def shape(self):
     return collections.OrderedDict(core=self.num_cores)
+
+  @property
+  def dimension_semantics(self) -> Sequence[str]:
+    return ["core_parallel"]
 
   def discharges_effect(self, effect):
     del effect  # Unused.
@@ -211,11 +219,7 @@ def _scalar_subcore_mesh_discharge_rule(
       *args,
       mesh=mesh,
       jaxpr=jaxpr,
-      compiler_params=dataclasses.replace(
-          compiler_params,
-          dimension_semantics=["core_parallel"],
-          kernel_type=tpu_core.KernelType.SC_SCALAR_SUBCORE,
-      ),
+      compiler_params=compiler_params,
       interpret=interpret,
       debug=debug,
       cost_estimate=cost_estimate,
@@ -260,6 +264,10 @@ class VectorSubcoreMesh:
       )
 
   @property
+  def kernel_type(self) -> tpu_core.KernelType:
+    return tpu_core.KernelType.SC_VECTOR_SUBCORE
+
+  @property
   def default_memory_space(self) -> tpu_core.MemorySpace:
     return tpu_core.MemorySpace.HBM
 
@@ -267,6 +275,10 @@ class VectorSubcoreMesh:
   def shape(self):
     return collections.OrderedDict(
         core=self.num_cores, subcore=self.num_subcores)
+
+  @property
+  def dimension_semantics(self) -> Sequence[str]:
+    return ["core_parallel", "subcore_parallel"]
 
   def discharges_effect(self, effect):
     del effect  # Unused.
@@ -305,11 +317,7 @@ def _vector_subcore_mesh_discharge_rule(
       *args,
       mesh=mesh,
       jaxpr=jaxpr,
-      compiler_params=dataclasses.replace(
-          compiler_params,
-          dimension_semantics=["core_parallel", "subcore_parallel"],
-          kernel_type=tpu_core.KernelType.SC_VECTOR_SUBCORE,
-      ),
+      compiler_params=compiler_params,
       interpret=interpret,
       debug=debug,
       cost_estimate=cost_estimate,

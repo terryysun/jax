@@ -105,8 +105,44 @@ def _mpmd_map_typecheck_rule(ctx_factory, *in_atoms, meshes, **params):
 jax_core.custom_typechecks[mpmd_map_p] = _mpmd_map_typecheck_rule
 
 
-@functools.partial(mlir.register_lowering, mpmd_map_p)
-def _mpmd_map_lowering(
+def _mpmd_map_tpu_lowering(
+    ctx: mlir.LoweringRuleContext,
+    *in_nodes,
+    jaxprs,
+    grid_mappings,
+    meshes,
+    input_output_aliases,
+    debug,
+    interpret,
+    compiler_params,
+    cost_estimate,
+    out_avals,
+    metadata,
+    name,
+):
+  try:
+    from jax._src.pallas.mosaic import pallas_call_registration
+  except ImportError:
+    raise pallas_call._unsupported_lowering_error("tpu")
+
+  return pallas_call_registration.mpmd_map_tpu_lowering_rule(
+      ctx,
+      *in_nodes,
+      jaxprs=jaxprs,
+      grid_mappings=grid_mappings,
+      meshes=meshes,
+      input_output_aliases=input_output_aliases,
+      debug=debug,
+      interpret=interpret,
+      compiler_params=compiler_params,
+      cost_estimate=cost_estimate,
+      out_avals=out_avals,
+      metadata=metadata,
+      name=name,
+  )
+
+
+def _mpmd_map_fallback_lowering(
     ctx: mlir.LoweringRuleContext,
     *in_nodes,
     meshes,
@@ -128,6 +164,14 @@ def _mpmd_map_lowering(
   [jaxpr] = jaxprs
   [mesh] = meshes
   [grid_mapping] = grid_mappings
+
+  if hasattr(mesh, "dimension_semantics"):
+    compiler_params = compiler_params.replace(
+        dimension_semantics=mesh.dimension_semantics
+    )
+  if hasattr(mesh, "kernel_type"):
+    compiler_params = compiler_params.replace(kernel_type=mesh.kernel_type)
+
   return pallas_call._pallas_call_lowering(
       ctx,
       *in_nodes,
@@ -142,6 +186,24 @@ def _mpmd_map_lowering(
       out_avals=out_avals,
       metadata=metadata,
       name=name,
+  )
+
+
+@functools.partial(mlir.register_lowering, mpmd_map_p)
+def _mpmd_map_lowering(ctx: mlir.LoweringRuleContext, *in_nodes, **params):
+  return mlir.lower_per_platform(
+      ctx,
+      "mpmd_map",
+      dict(
+          cpu=_mpmd_map_fallback_lowering,
+          tpu=_mpmd_map_tpu_lowering,
+          cuda=_mpmd_map_fallback_lowering,
+          rocm=_mpmd_map_fallback_lowering,
+      ),
+      None,  # default_rule
+      jax_core.no_effects,
+      *in_nodes,
+      **params,
   )
 
 
@@ -215,7 +277,7 @@ def _mpmd_map(
     for mesh, fn in meshes_and_fns:
       grid_spec = pallas_core.GridSpec(
           grid=tuple(mesh.shape.items()),
-          in_specs=tuple(
+          in_specs=in_tree.unflatten(
               pallas_core.BlockSpec(
                   memory_space=aval.memory_space
                   if isinstance(aval, pallas_core.ShapedArrayWithMemorySpace)
@@ -223,7 +285,7 @@ def _mpmd_map(
               )
               for aval in flat_avals
           ),
-          out_specs=tuple(
+          out_specs=out_tree.unflatten(
               pallas_core.BlockSpec(
                   memory_space=aval.memory_space
                   if isinstance(aval, pallas_core.ShapedArrayWithMemorySpace)
