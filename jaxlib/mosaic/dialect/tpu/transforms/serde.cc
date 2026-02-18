@@ -169,9 +169,9 @@ LogicalResult wait_dma2_upgrade(Operation* op, int version, bool&) {
              << op->getNumOperands();
     }
     op->setAttr(
-      OpTrait::AttrSizedOperandSegments<
-          EnqueueDMAOp>::getOperandSegmentSizeAttr(),
-      mlir::DenseI32ArrayAttr::get(op->getContext(), {1, 1, 1, 0, 0}));
+        OpTrait::AttrSizedOperandSegments<
+            EnqueueDMAOp>::getOperandSegmentSizeAttr(),
+        mlir::DenseI32ArrayAttr::get(op->getContext(), {1, 1, 1, 0, 0}));
   }
   return success();
 }
@@ -179,8 +179,8 @@ LogicalResult wait_dma2_upgrade(Operation* op, int version, bool&) {
 LogicalResult wait_dma2_downgrade(Operation* op, int version, bool&) {
   if (version < 7) {
     auto operands = op->getAttrOfType<mlir::DenseI32ArrayAttr>(
-      OpTrait::AttrSizedOperandSegments<
-          EnqueueDMAOp>::getOperandSegmentSizeAttr());
+        OpTrait::AttrSizedOperandSegments<
+            EnqueueDMAOp>::getOperandSegmentSizeAttr());
     if (!operands || operands.size() != 5) {
       return op->emitError("Missing or invalid AttrSizedOperandSegments");
     }
@@ -285,13 +285,11 @@ LogicalResult arith_constant_downgrade(Operation* op, int version, bool&) {
   if (version < 10) {
     auto value_attr = op->getAttrOfType<DenseElementsAttr>("value");
     // Only i1 dense elements attrs are affected.
-    if (!value_attr || value_attr.getElementType() !=
-                           mlir::IntegerType::get(op->getContext(), 1)) {
+    if (!value_attr ||
+        value_attr.getElementType() !=
+            mlir::IntegerType::get(op->getContext(), 1) ||
+        !value_attr.isSplat()) {
       return success();
-    }
-    if (!value_attr.isSplat()) {
-      return op->emitOpError("Downgrade to version ")
-             << version << " not implemented: value is not a splat";
     }
     char new_splat = value_attr.getSplatValue<bool>() ? 0xff : 0x00;
     op->setAttr("value", mlir::SplatElementsAttr::getFromRawBuffer(
@@ -338,7 +336,7 @@ void MosaicSerdePass::runOnOperation() {
   }
   int serialize_version = -1;
   if (serialize) {
-     serialize_version = target_version.hasValue() ? target_version : kVersion;
+    serialize_version = target_version.hasValue() ? target_version : kVersion;
   }
   if (failed(jaxlib::mosaic::RunSerde(
           module, upgrade_rules(), downgrade_rules(), serialize,
