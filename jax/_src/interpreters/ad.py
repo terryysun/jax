@@ -469,7 +469,7 @@ def ct_check(primal, ct):
     return
   ct_aval = ct.aval if type(ct) is Zero else typeof(ct)
   ct_aval_expected = primal.aval.to_cotangent_aval()  # type: ignore
-  if not core.typematch(ct_aval, ct_aval_expected, only_shape_shd_check=True):
+  if not core.typematch(ct_aval, ct_aval_expected, no_dtype_check=True):
     # TODO(yashkatariya, mattjj): Add primitive name here for
     # better error message?
     raise ValueError(

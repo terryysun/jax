@@ -3177,7 +3177,7 @@ def typecompat(aval_ref: AbstractValue, aval: AbstractValue) -> bool:
     return False
 
 def typematch(t1: AbstractValue, t2: AbstractValue,
-              only_shape_shd_check: bool = False) -> bool:
+              no_dtype_check: bool = False) -> bool:
   """Determine whether `t1` and `t2` are equivalent. Ignores weak_type."""
   t1 = t1.normalize()
   t2 = t2.normalize()
@@ -3185,19 +3185,18 @@ def typematch(t1: AbstractValue, t2: AbstractValue,
   if t1 == t2:
     return True
   elif isinstance(t1, ShapedArray) and isinstance(t2, ShapedArray):
-    if only_shape_shd_check:
-      return cmp_shape_sharding_vma(t1, t2)
-    return (t1.dtype == t2.dtype and cmp_shape_sharding_vma(t1, t2) and
-            t1.memory_space == t2.memory_space)
+    if no_dtype_check:
+      return cmp_shape_shd_vma_memsp(t1, t2)
+    return t1.dtype == t2.dtype and cmp_shape_shd_vma_memsp(t1, t2)
   elif isinstance(t1, AbstractRef) and isinstance(t2, AbstractRef):
     # We want to use the regular typecheck for ShapedArray here.
-    return (typematch(t1.inner_aval, t2.inner_aval, only_shape_shd_check) and  # type: ignore
+    return (typematch(t1.inner_aval, t2.inner_aval, no_dtype_check) and  # type: ignore
             (t1.memory_space is None or t2.memory_space is None or  # type: ignore
              t1.memory_space == t2.memory_space))  # type: ignore
   else:
     return False
 
-def cmp_shape_sharding_vma(t1, t2):
+def cmp_shape_shd_vma_memsp(t1, t2):
   # TODO(yashkatariya): Expand this to Manual and Auto mode.
   # See https://github.com/jax-ml/jax/issues/26474
   t1_mesh, t2_mesh = t1.sharding.mesh, t2.sharding.mesh
@@ -3213,7 +3212,7 @@ def cmp_shape_sharding_vma(t1, t2):
   else:
     shd_eq = True
   return (shd_eq and definitely_equal_shape(t1.shape, t2.shape) and
-          t1.vma == t2.vma)
+          t1.vma == t2.vma and t1.memory_space == t2.memory_space)
 
 def aval_mismatch_extra(a1: AbstractValue, a2: AbstractValue) -> str:
   assert not typematch(a1, a2)

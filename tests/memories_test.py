@@ -1074,7 +1074,8 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     def f(x):
       return jnp.sin(x)
 
-    @compute_on('device_host')
+    @compute_on2(compute_type='device_host',
+                 out_memory_spaces=jax.memory.Space.Device)
     @jax.jit
     def eq(x, y):
       return (x == y).astype(jnp.float32)
@@ -1107,7 +1108,8 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     def f(x):
       return jnp.sin(x)
 
-    @compute_on('device_host')
+    @compute_on2(compute_type='device_host',
+                 out_memory_spaces=jax.memory.Space.Device)
     @jax.jit
     def eq(x, y):
       return (x == y).astype(jnp.float32)
