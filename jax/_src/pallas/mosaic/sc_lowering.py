@@ -14,7 +14,6 @@
 """Lowering for Pallas TPU SparseCore."""
 
 from collections.abc import Sequence
-import contextlib
 import dataclasses
 import functools
 from typing import Any, cast, NoReturn
@@ -52,36 +51,7 @@ zip, unsafe_zip = util.safe_zip, zip
 
 MemorySpace = tpu_core.MemorySpace
 
-
-class GlobalAllocations:
-  """Hands out global allocations sequentially during lowering."""
-  def __init__(self, allocations: dict[pallas_core.MemoryRef, list[ir.Value]]):
-    self._allocations = {k: list(v) for k, v in allocations.items()}
-
-  def next_allocation(self, what: state.AbstractRef | pallas_core.TransformedRef) -> Any:
-    """Returns the next available allocation for the given shape."""
-    what = pallas_core.MemoryRef(what.inner_aval, what.memory_space)
-    if what not in self._allocations:
-      raise LookupError(f"No allocations are available for {what}.")
-    if not self._allocations[what]:
-      raise LookupError(f"No more allocations available for {what}.")
-    return self._allocations[what].pop()
-
-  @contextlib.contextmanager
-  def verify_usage(self):
-    """Scope that verifies all allocations are used."""
-    try:
-      yield
-    finally:
-      unused = [k for k, v in self._allocations.items() if v]
-      if unused:
-        raise AssertionError(f"Some allocations unused ({unused}).")
-
-
-@dataclasses.dataclass
-class LoweringContext(tc_lowering.LoweringContext):
-  global_allocations: GlobalAllocations
-
+LoweringContext = tc_lowering.LoweringContext
 LoweringRuleContext = tc_lowering.LoweringRuleContext
 
 _transform_ref = tc_lowering._transform_ref
@@ -278,12 +248,6 @@ def lower_jaxpr_to_func(
         for i, idx in enumerate(grid_indices)
         if i not in mosaic_grid_mapping.vmapped_dims
     )
-
-    allocations = sc_core.gather_global_allocations(jaxpr)
-    flat_allocations, allocations_tree = tree_util.tree_flatten(allocations)
-    allocation_operands = operands_and_scratch[
-        len(operands_and_scratch) - len(flat_allocations):]
-    allocations = allocations_tree.unflatten(allocation_operands)
     lowering_context = LoweringContext(
         mosaic_grid_mapping.grid,  # type: ignore
         mosaic_grid_mapping.grid_names,
@@ -297,12 +261,10 @@ def lower_jaxpr_to_func(
         forward_compatible=forward_compatible,
         backend=backend,
         dynamic_shape_replacement_fn=dynamic_shape_replacement_fn,
-        global_allocations=GlobalAllocations(allocations),
     )
-    with lowering_context.global_allocations.verify_usage():
-      return tc_lowering.jaxpr_subcomp(
+    return tc_lowering.jaxpr_subcomp(
           lowering_context, jaxpr, *scalar_prefetch, *operands_and_scratch
-      )
+    )
 
   body = func.FuncOp.from_py_func(*arg_types, name=name)(body_func)
   func_op = cast(func.FuncOp, body.func_op)
@@ -348,13 +310,6 @@ register_lowering_rule = functools.partial(
         tpu_core.KernelType.SC_VECTOR_SUBCORE,
     ),
 )
-
-
-@register_lowering_rule(pallas_primitives.get_global_p)
-def _get_logbal_lowering_rule(ctx: LoweringRuleContext, *, what):
-  lctx = ctx.lowering_context
-  assert isinstance(lctx, LoweringContext)
-  return lctx.global_allocations.next_allocation(what)
 
 
 @register_lowering_rule(state_primitives.get_p)
