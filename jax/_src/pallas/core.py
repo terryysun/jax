@@ -831,6 +831,10 @@ def dynamic_shapes_export_enabled() -> bool:
   return _pallas_tracing_env.dynamic_shapes
 
 
+def is_dynamic_dim(d) -> bool:
+  return d is None or not jax_core.is_constant_dim(d)
+
+
 @dataclasses.dataclass(frozen=True)
 class GridMapping:
   """An internal canonicalized version of GridSpec.
@@ -915,7 +919,7 @@ class GridMapping:
 
   @property
   def num_dynamic_grid_bounds(self):
-    return sum(b is dynamic_grid_dim for b in self.grid)
+    return sum(1 for b in self.grid if is_dynamic_dim(b))
 
   @property
   def num_scratch_operands(self):
@@ -1168,7 +1172,10 @@ def get_grid_mapping(
     dim_check : Any = jax_core.is_constant_dim  # type: ignore[no-redef]
   assert all(i is None or dim_check(i) for i in grid_spec.grid)
   grid_mapping_grid = tuple(
-      dynamic_grid_dim if d is None else d for d in grid_spec.grid
+      dynamic_grid_dim if (
+          d is None or (not jax_core.is_constant_dim(d) and not dynamic_shapes_export_enabled())
+      ) else d
+      for d in grid_spec.grid
   )
   # The inputs for the index maps
   index_map_avals = (

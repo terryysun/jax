@@ -323,6 +323,7 @@ jax_py_test(
     main = "export_pallas_test.py",
     deps = [
         "//jax/_src:test_util",
+        "//jax/_src/pallas:pallas_test_util",
         "//jax/experimental:pallas",
         "//jax/experimental:pallas_gpu",  # build_cleaner: keep
         "//jax/experimental:pallas_mosaic_gpu",  # build_cleaner: keep
@@ -346,6 +347,7 @@ jax_multiplatform_test(
     ],
     tags = [],
     deps = [
+        "//jax/_src/pallas:pallas_test_util",
         "//jax/experimental:pallas",
         "//jax/experimental:pallas_gpu",  # build_cleaner: keep
         "//jax/experimental:pallas_mosaic_gpu",  # build_cleaner: keep

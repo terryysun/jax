@@ -1007,7 +1007,7 @@ def lower_jaxpr_into_module(
     # Dynamic grid bounds have to go at the front.
     if mosaic_grid_mapping.grid:
       dynamic_dims = (
-          d for d in mosaic_grid_mapping.grid if not isinstance(d, int)
+          d for d in mosaic_grid_mapping.grid if pallas_core.is_dynamic_dim(d)
       )
       for operand_idx, dim in enumerate(dynamic_dims):
         location_of_dimvar.setdefault(
