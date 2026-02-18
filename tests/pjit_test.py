@@ -10432,6 +10432,20 @@ class ShardingInTypesTest(jtu.JaxTestCase):
         ValueError, "must be reduced over the same mesh axes as operand"):
       jnp.reshape(arr, (4, 2), out_sharding=P('x'))
 
+  @jtu.with_explicit_mesh((1,), 'x')
+  def test_broadcast_transpose_unit_dims(self, mesh):
+    x = jnp.ones((1,), out_sharding=P('x'))
+    f = lambda x: jnp.expand_dims(x, -1).sum()
+    y = jax.jit(jax.grad(f))(x)
+    self.assertEqual(y.sharding, NamedSharding(mesh, P('x')))
+
+    x = jnp.ones((1, 4), out_sharding=P('x'))
+    def g(x):
+      out = x * lax.rsqrt(jnp.mean(x ** 2, axis=-1, keepdims=True))
+      return out.sum()
+    y = jax.jit(jax.grad(g))(x)
+    self.assertEqual(y.sharding, NamedSharding(mesh, P('x', None)))
+
 
 @jtu.pytest_mark_if_available('multiaccelerator')
 class PJitErrorTest(jtu.JaxTestCase):
