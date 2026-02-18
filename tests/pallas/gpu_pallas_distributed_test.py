@@ -50,15 +50,6 @@ class TestCase(jt_multiprocess.MultiProcessTest if is_nvshmem_used() is None els
   def setUp(self):
     if jtu.test_device_matches(["rocm"]):
       self.skipTest("Mosaic not supported on ROCm currently.")
-    # TODO(b/482756208): Fix this
-    if jax.local_device_count() > 1:
-      self.skipTest("Collective metadata tests are flaky since right now when "
-                    "collective metadata is used there is no cross-device "
-                    "barrier before the module execution. This might lead to a "
-                    "situation when device 1 writes a signal to the device 2 "
-                    "the same time as device 2 zeroes it's signal memory "
-                    "buffer to launch a kernel. Eventually device 1 waits "
-                    "forever on a deadlock.")
 
     if (not jtu.test_device_matches(["cuda"]) or
         not jtu.is_cuda_compute_capability_at_least("9.0")):
