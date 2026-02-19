@@ -16,7 +16,6 @@ load(
     "//jaxlib:jax.bzl",
     "if_oss",
     "jax_generate_backend_suites",
-    "jax_gpu_support_deps",
     "jax_multiplatform_test",
     "jax_py_test",
     "py_deps",
@@ -316,48 +315,6 @@ jax_multiplatform_test(
     ] + py_deps("absl/testing"),
 )
 
-jax_py_test(
-    name = "export_pallas_test_cpu_only",
-    srcs = ["export_pallas_test.py"],
-    args = ["--jax_test_dut=cpu"],
-    main = "export_pallas_test.py",
-    deps = [
-        "//jax/_src:test_util",
-        "//jax/_src/pallas:pallas_test_util",
-        "//jax/experimental:pallas",
-        "//jax/experimental:pallas_gpu",  # build_cleaner: keep
-        "//jax/experimental:pallas_mosaic_gpu",  # build_cleaner: keep
-        "//jax/experimental:pallas_tpu",  # build_cleaner: keep
-    ] + jax_gpu_support_deps + py_deps([
-        "absl/testing",
-        "numpy",
-    ]),
-)
-
-jax_multiplatform_test(
-    name = "export_pallas_test",
-    srcs = ["export_pallas_test.py"],
-    # Cross-compilation on CPU is tested separately.
-    disable_configs = [
-        "cpu",
-        "cpu_x32",
-    ],
-    enable_configs = [
-        "gpu_a100_x32",
-    ],
-    tags = [],
-    deps = [
-        "//jax/_src/pallas:pallas_test_util",
-        "//jax/experimental:pallas",
-        "//jax/experimental:pallas_gpu",  # build_cleaner: keep
-        "//jax/experimental:pallas_mosaic_gpu",  # build_cleaner: keep
-        "//jax/experimental:pallas_tpu",  # build_cleaner: keep
-    ] + py_deps([
-        "absl/testing",
-        "numpy",
-    ]),
-)
-
 jax_multiplatform_test(
     name = "pallas_shape_poly_test",
     srcs = ["pallas_shape_poly_test.py"],
@@ -372,8 +329,10 @@ jax_multiplatform_test(
     ],
     tags = [],
     deps = [
+        "//jax/_src/pallas:pallas_test_util",
         "//jax/experimental:pallas",
         "//jax/experimental:pallas_gpu",  # build_cleaner: keep
+        "//jax/experimental:pallas_mosaic_gpu",  # build_cleaner: keep
         "//jax/experimental:pallas_tpu",  # build_cleaner: keep
     ] + py_deps([
         "absl/testing",
