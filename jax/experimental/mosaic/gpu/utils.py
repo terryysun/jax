@@ -2096,15 +2096,21 @@ def cluster_idx(
   return lin_idx
 
 
-def get_cluster_ptr(ptr: ir.Value, cluster_block: ir.Value):
+def get_cluster_ptr(
+    ptr: ir.Value, cluster_block: ir.Value, generic: bool = True
+):
   i32 = ir.IntegerType.get_signless(32)
   assert cluster_block.type == i32, cluster_block.type
   assert ptr.type == ir.Type.parse("!llvm.ptr<3>"), ptr.type
   mapped_smem_ptr = nvvm.mapa(ir.Type.parse("!llvm.ptr<7>"), ptr, cluster_block)
+  if not generic:
+    return mapped_smem_ptr
   return llvm.addrspacecast(ir.Type.parse("!llvm.ptr"), mapped_smem_ptr)
 
 
-def get_cluster_ref(ref: ir.Value, dim: gpu.Dimension, idx: ir.Value):
+def get_cluster_ref(
+    ref: ir.Value, dim: gpu.Dimension, idx: ir.Value, generic: bool = True
+):
   i32 = ir.IntegerType.get_signless(32)
   # We replace the offset in the ref type by 0, because memref_ptr always
   # folds the offset into the pointer.
@@ -2114,7 +2120,7 @@ def get_cluster_ref(ref: ir.Value, dim: gpu.Dimension, idx: ir.Value):
       ref_ty.shape,
       ref_ty.element_type,
       ir.StridedLayoutAttr.get(0, strides),
-      None,
+      None if generic else ir.IntegerAttr.get(i32, 7),
   )
   if ref_ty.memory_space != ir.Attribute.parse("#gpu.address_space<workgroup>"):
     raise ValueError(f"Expected SMEM but got: {ref.memory_space}")
@@ -2122,8 +2128,9 @@ def get_cluster_ref(ref: ir.Value, dim: gpu.Dimension, idx: ir.Value):
   idxs[dim] = idx
   flat_block = arith.index_cast(i32, cluster_idx(gpu.Dimension, idxs))  # type: ignore
   return ptr_as_memref(
-      get_cluster_ptr(memref_ptr(ref, memory_space=3), flat_block),
+      get_cluster_ptr(memref_ptr(ref, memory_space=3), flat_block, generic),
       result_type,
+      ptr_memory_space=None if generic else 7,
   )
 
 
