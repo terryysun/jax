@@ -21,9 +21,11 @@ limitations under the License.
 #include <string_view>
 #include <utility>
 
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
@@ -81,6 +83,10 @@ std::unique_ptr<OperationPass<func::FuncOp>> createInferMemRefLayoutPass(
 // annotation of its parent function. If no such annotation is found, returns
 // kTc.
 FailureOr<CoreType> GetCoreTypeOfParentFunc(Operation &op);
+
+// Returns the function in the module with the given core type.
+absl::StatusOr<func::FuncOp> GetFuncWithCoreType(ModuleOp module,
+                                                 CoreType core_type);
 
 // Changes the memory space of the value and propagates it through the program.
 LogicalResult specializeMemorySpace(TypedValue<MemRefType> value,

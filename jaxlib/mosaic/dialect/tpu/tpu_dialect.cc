@@ -22,6 +22,9 @@ limitations under the License.
 #include <utility>
 
 #include "absl/hash/hash.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_format.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -34,6 +37,7 @@ limitations under the License.
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
@@ -245,6 +249,37 @@ FailureOr<CoreType> GetCoreTypeOfParentFunc(Operation &op) {
                           << " is not inside a func.func";
   }
   return TPUDialect::GetCoreTypeAttr(func_op).value_or(CoreType::kTc);
+}
+
+absl::StatusOr<func::FuncOp> GetFuncWithCoreType(ModuleOp module,
+                                                 CoreType core_type) {
+  func::FuncOp result = nullptr;
+  for (func::FuncOp func_op : module.getOps<func::FuncOp>()) {
+    if (TPUDialect::GetCoreTypeAttr(func_op) != core_type) {
+      continue;
+    }
+    if (result != nullptr) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "Multiple functions with tpu.core_type = %v found", core_type));
+    }
+    result = func_op;
+  }
+  if (result != nullptr) {
+    return result;
+  }
+  // We have to maintain backwards compatibility with TC kernels which do not
+  // set the tpu.core_type attribute.
+  bool fallback_to_main = core_type == CoreType::kTc;
+  if (!fallback_to_main) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "No function with tpu.core_type = %v found", core_type));
+  }
+  if (auto main_func = module.lookupSymbol<func::FuncOp>("main")) {
+    return main_func;
+  }
+  return absl::InvalidArgumentError(absl::StrFormat(
+      "No function with tpu.core_type = %v nor a main function found",
+      core_type));
 }
 
 void VectorLayoutAttr::print(AsmPrinter &printer) const {
