@@ -332,7 +332,8 @@ def jaxpr_as_fun(closed_jaxpr: ClosedJaxpr, *args):
 # save allocations.
 class JaxprEqnContextManager:
   __slots__ = ['context', 'prev_compute_type', 'prev_threefry_partitionable',
-               'prev_xla_metadata', 'prev_abstract_mesh']
+               'prev_xla_metadata', 'prev_abstract_mesh',
+               'prev_remove_size_one_mesh_axis']
 
   def __init__(self, context):
     self.context = context
@@ -353,17 +354,16 @@ class JaxprEqnContextManager:
       )
 
     self.prev_threefry_partitionable = config.threefry_partitionable.swap_local(
-        self.context.threefry_partitionable
-    )
+        self.context.threefry_partitionable)
     if self.context.xla_metadata:
       self.prev_xla_metadata = config.xla_metadata_context_manager.get_local()
       updated = xla_metadata_lib.update_metadata(
-          self.prev_xla_metadata, self.context.xla_metadata
-      )
+          self.prev_xla_metadata, self.context.xla_metadata)
       config.xla_metadata_context_manager.set_local(updated)
     self.prev_abstract_mesh = config.abstract_mesh_context_manager.swap_local(
-        self.context.cur_abstract_mesh
-    )
+        self.context.cur_abstract_mesh)
+    self.prev_remove_size_one_mesh_axis = config.remove_size_one_mesh_axis_from_type.swap_local(
+        self.context.remove_size_one_mesh_axis)
 
   def __exit__(self, exc_type, exc_value, traceback):
     config.compute_on_context_manager.set_local(self.prev_compute_type)
@@ -371,23 +371,26 @@ class JaxprEqnContextManager:
     if self.context.xla_metadata:
       config.xla_metadata_context_manager.set_local(self.prev_xla_metadata)
     config.abstract_mesh_context_manager.set_local(self.prev_abstract_mesh)
+    config.remove_size_one_mesh_axis_from_type.set_local(self.prev_remove_size_one_mesh_axis)
 
 
 class JaxprEqnContext:
 
   __slots__ = ['compute_type', 'threefry_partitionable', 'xla_metadata',
-               'cur_abstract_mesh']
+               'cur_abstract_mesh', 'remove_size_one_mesh_axis']
 
   compute_type: str | None
   threefry_partitionable: bool
   xla_metadata: dict[str, Any] | None
   cur_abstract_mesh: mesh_lib.AbstractMesh
+  remove_size_one_mesh_axis: bool
 
   def __init__(self, compute_type: str | None, threefry_partitionable: bool,
                xla_metadata: dict[str, Any] | None = None):
     self.compute_type = compute_type
     self.threefry_partitionable = threefry_partitionable
     self.cur_abstract_mesh = mesh_lib.get_abstract_mesh()
+    self.remove_size_one_mesh_axis = config.remove_size_one_mesh_axis_from_type.value
     self.xla_metadata = xla_metadata
 
   @property
@@ -399,22 +402,21 @@ class JaxprEqnContext:
         f"JaxprEqnContext(compute_type={self.compute_type}, "
         f"threefry_partitionable={self.threefry_partitionable}, "
         f"cur_abstract_mesh={self.cur_abstract_mesh}, "
+        f"remove_size_one_mesh_axis={self.remove_size_one_mesh_axis}, "
         f"xla_metadata={self.xla_metadata})"
     )
 
   def __hash__(self):
-    return hash((
-        self.compute_type,
-        self.threefry_partitionable,
-        self.cur_abstract_mesh,
-        None if self.xla_metadata is None
-        else tuple(sorted(self.xla_metadata.items())),
-    ))
+    return hash((self.compute_type, self.threefry_partitionable,
+                 self.cur_abstract_mesh, self.remove_size_one_mesh_axis,
+                 (None if self.xla_metadata is None else
+                  tuple(sorted(self.xla_metadata.items())))))
 
   def __eq__(self, other):
     return (self.compute_type == other.compute_type and
             self.threefry_partitionable == other.threefry_partitionable and
             self.cur_abstract_mesh == other.cur_abstract_mesh and
+            self.remove_size_one_mesh_axis == other.remove_size_one_mesh_axis and
             self.xla_metadata == other.xla_metadata)
 
 

@@ -10446,6 +10446,19 @@ class ShardingInTypesTest(jtu.JaxTestCase):
     y = jax.jit(jax.grad(g))(x)
     self.assertEqual(y.sharding, NamedSharding(mesh, P('x', None)))
 
+  @jtu.with_explicit_mesh((2, 1), ('x', 'y'))
+  def test_config_remove_size_one_mesh_axis_roundtrip(self, mesh):
+    arr1 = jax.device_put(np.arange(8).reshape(4, 2), P('x', 'y'))
+    arr2 = jax.device_put(np.arange(8).reshape(4, 2), P('x', 'y'))
+
+    @jax.jit
+    def f(x, y):
+      with config.remove_size_one_mesh_axis_from_type(True):
+        return x + y
+
+    jaxpr = f.trace(arr1, arr2).jaxpr
+    jax.core.eval_jaxpr(jaxpr, (), arr1, arr2)  # doesn't crash
+
 
 @jtu.pytest_mark_if_available('multiaccelerator')
 class PJitErrorTest(jtu.JaxTestCase):
