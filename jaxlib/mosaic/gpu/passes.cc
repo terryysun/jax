@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -88,21 +89,10 @@ struct ConvertExtractStridedSlicePattern final
                                                         int_vec_ty, source)
                    .getResult(0);
     }
-    mlir::Value result = mlir::LLVM::UndefOp::create(
-        rewriter, op.getLoc(),
-        mlir::VectorType::get(op.getResult().getType().getShape(),
-                              element_type));
-    for (int64_t i = 0; i < size; ++i) {
-      result = mlir::LLVM::InsertElementOp::create(
-          rewriter, op.getLoc(), result,
-          mlir::LLVM::ExtractElementOp::create(
-              rewriter, op.getLoc(), source,
-              mlir::LLVM::ConstantOp::create(
-                  rewriter, op.getLoc(),
-                  rewriter.getI32IntegerAttr(i + start))),
-          mlir::LLVM::ConstantOp::create(rewriter, op.getLoc(),
-                                         rewriter.getI32IntegerAttr(i)));
-    }
+    mlir::SmallVector<int32_t> slice_indices(size);
+    std::iota(slice_indices.begin(), slice_indices.end(), start);
+    mlir::Value result = mlir::LLVM::ShuffleVectorOp::create(
+        rewriter, op.getLoc(), source, source, slice_indices);
     if (element_type != op.getResult().getType().getElementType()) {
       result = mlir::UnrealizedConversionCastOp::create(
           rewriter, op.getLoc(), op.getResult().getType(), result).getResult(0);
