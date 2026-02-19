@@ -2411,17 +2411,18 @@ class FragmentedArray:
         raise NotImplementedError(self.layout)
     # Silence type checker complaints.
     assert isinstance(self.layout, TiledLayout)
-    if len(self.layout.base_tile_shape) != len(self.shape):
-      raise NotImplementedError
     if isinstance(axis, int):
       axis = (axis,)
     layout = self.layout
+    untiled_rank = len(self.shape) - len(layout.base_tile_shape)
     tiled_tiling_shape = layout.tiled_tiling_shape
-    reduced_dims = layout.tiling.tile_dimension(axis[0])
-    for a in axis[1:]:
-      reduced_dims = tuple(
-          r or d for r, d in zip(reduced_dims, layout.tiling.tile_dimension(a), strict=True)
+    tiled_axes = tuple(a - untiled_rank for a in axis if a >= untiled_rank)
+    tiled_reduced_dims = (False,) * (len(layout.base_tile_shape) + len(tiled_tiling_shape))
+    for a in tiled_axes:
+      tiled_reduced_dims = tuple(
+          r or d for r, d in zip(tiled_reduced_dims, layout.tiling.tile_dimension(a), strict=True)
       )
+    reduced_dims = (*(a in axis for a in range(untiled_rank)), *tiled_reduced_dims)
     regs_shape = self.registers.shape
     reduced_shape = tuple(
         d if r else 1 for r, d in zip(reduced_dims, regs_shape, strict=True)
@@ -2666,7 +2667,7 @@ class FragmentedArray:
       return out_reg
 
     if reduced_shape:
-      vec_len = layout.reduce(axis).vector_length
+      vec_len = layout.reduce(tiled_axes).vector_length
     else:
       vec_len = 1
 
@@ -2754,7 +2755,7 @@ class FragmentedArray:
       )
       out_regs = np.asarray(out_reg, dtype=object)
     else:
-      reduced_layout = layout.reduce(axis)
+      reduced_layout = layout.reduce(tiled_axes)
       out_regs = out_regs.reshape(
           reduced_layout.registers_shape(tuple(reduced_logical_shape))
       )

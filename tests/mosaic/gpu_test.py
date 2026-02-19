@@ -3855,6 +3855,39 @@ class FragmentedArrayTest(TestCase):
       raise NotImplementedError(f"Unsupported op: {op}")
     np.testing.assert_array_equal(result, expected)
 
+  @parameterized.named_parameters(
+      ("untiled", 0, (2, 64, 32)),
+      ("tiled", 2, (2, 64, 32)),
+      ("all_tiled", (1, 2), (2, 64, 32)),
+      ("all", (0, 1, 2), (2, 64, 32)),
+      ("4d_untiled", 0, (2, 4, 64, 16)),
+      ("4d_tiled", 3, (2, 4, 64, 16)),
+  )
+  def test_untiled_reduce(self, axis, shape):
+    def kernel(ctx, inp, dst, scratch):
+      arr = mgpu.FragmentedArray.load_untiled(
+          inp, layout=mgpu.WGMMA_LAYOUT, optimized=False, is_signed=True
+      )
+      reduced = arr.reduce("add", axis=axis, scratch=scratch)
+      reduced.store_untiled(dst, optimized=False)
+
+    in_shape = jax.ShapeDtypeStruct(shape, jnp.int32)
+    x = np.arange(math.prod(shape), dtype=jnp.int32).reshape(shape)
+    axes = (axis,) if isinstance(axis, int) else axis
+    out_shape_tuple = tuple(
+        d for i, d in enumerate(shape) if i not in axes
+    )
+    out_shape = jax.ShapeDtypeStruct(out_shape_tuple, jnp.int32)
+    result = mgpu.as_gpu_kernel(
+        kernel,
+        (1, 1, 1),
+        (128, 1, 1),
+        in_shape,
+        out_shape,
+        smem_scratch_shape=jax.ShapeDtypeStruct((128,), jnp.int32),
+    )(x)
+    np.testing.assert_array_equal(result, x.sum(axis=axis))
+
   @parameterized.product(
       vec_size=(4, 3, 1),
       dtype=(jnp.float32, jnp.float16, jnp.bfloat16,
