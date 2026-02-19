@@ -460,7 +460,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",  # Times out without _full
         "gpu_b200x2",
     ],
     env = {
