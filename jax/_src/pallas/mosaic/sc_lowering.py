@@ -109,7 +109,7 @@ def lower_jaxpr_into_module(
     )
   for bm in grid_mapping.block_mappings:
     for bd in bm.block_shape:
-      if not isinstance(bd, pallas_core.Blocked):
+      if not isinstance(bd, (pallas_core.Squeezed, pallas_core.Blocked)):
         raise NotImplementedError(
             "Unsupported block dimension type: "
             f"{type(bd)} for block shape: {bm.block_shape}"
@@ -458,17 +458,15 @@ def _iota_lowering_rule_sc(ctx: LoweringRuleContext, dtype, shape, dimension,
 
 
 def _check_aval_is_supported(caller: str, aval: jax_core.ShapedArray) -> None:
-  if aval.shape in sc_core.SUPPORTED_VECTOR_SHAPES.get(aval.dtype, []):
+  supported_shapes = sc_core.supported_shapes(aval.dtype)
+  if aval.shape in supported_shapes:
     return
-  supported_shapes = ", ".join(
-      map(repr, sc_core.SUPPORTED_VECTOR_SHAPES[aval.dtype])
-  )
   if not supported_shapes:
     raise NotImplementedError(f"{caller} does not support {aval.dtype} arrays")
   else:
     raise NotImplementedError(
         f"{caller} only supports {aval.dtype} arrays of shapes"
-        f" [{supported_shapes}], got {aval.shape}"
+        f" [{', '.join(map(repr, supported_shapes))}], got {aval.shape}"
     )
 
 

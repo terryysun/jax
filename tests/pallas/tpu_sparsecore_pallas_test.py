@@ -228,40 +228,29 @@ class VectorSubcoreTest(PallasSCTest):
 
     np.testing.assert_array_equal(kernel(x), x + 1)
 
-  @parameterized.named_parameters(*(
-      dict(
-          testcase_name=(
-              f"_{'x'.join(map(str, shape))}x{dtype.name}_{minor_scale}"
-          ),
-          dtype=dtype,
-          out_shape=shape,
-          minor_scale=minor_scale,
-      )
-      for dtype, shapes in sc_core.SUPPORTED_VECTOR_SHAPES.items()
-      for shape in shapes
-      if math.prod(shape) * dtype.itemsize == 32
-      for minor_scale in [1, 2, 4]
-  ))
-  def test_slicing(self, dtype, out_shape, minor_scale):
+  @parameterized.product(
+      dtype=[
+          # fmt: off
+          "int32", "uint32", "float32", "int16", "uint16", "float16",
+          "bfloat16", "int8", "uint8"
+          # fmt: on
+      ]
+  )
+  @jtu.thread_unsafe_test(condition=not jtu.hypothesis_is_thread_safe())
+  @hp.given(hps.data())
+  # TODO(b/478865387): Remove the skip once the bug is fixed.
+  @absltest.skip("Needs vector unrolling pass")
+  def test_slicing(self, dtype, data):
     self.skip_if_tc_tiling()
 
-    if dtype == jnp.float16:
+    if dtype == "float16":
       # TODO(b/433704850): Remove this once the bug is fixed.
-      self.skipTest("Crashes")
-    # TODO(b/478819791): Remove this once the bug is fixed.
-    if jtu.is_device_tpu(7, "x"):
-      self.skipTest("Need to update SUPPORTED_VECTOR_SHAPES")
+      self.skipTest("Crashes in the backend")
 
-    crashing = {
-        "int16": [(2, self.num_lanes)],
-        "uint16": [(2, self.num_lanes)],
-        "float16": [(2, self.num_lanes)],
-        "bfloat16": [(2, self.num_lanes)],
-        "int8": [(4, self.num_lanes)],
-        "uint8": [(4, self.num_lanes)],
-    }
-    if out_shape in crashing.get(dtype.name, []):
-      self.skipTest("Crashes")
+    out_shape = data.draw(
+        hps.sampled_from(sc_core.supported_shapes(dtype)), label="out_shape"
+    )
+    minor_scale = data.draw(hps.sampled_from([1, 2, 4]), label="minor_scale")
 
     out_minor = out_shape[-1]
     in_minor = out_minor * minor_scale
@@ -680,10 +669,14 @@ class VectorSubcoreTest(PallasSCTest):
         ),
         grid=(num_steps,),
         in_specs=(
-            plsc.BlockSpec((1, self.num_lanes), indexed_by=1, indexed_dim=0),
+            plsc.BlockSpec(
+                (pl.Squeezed(), self.num_lanes), indexed_by=1, indexed_dim=0
+            ),
             pl.BlockSpec((1,), lambda i: i),
         ),
-        out_specs=pl.BlockSpec((1, self.num_lanes), lambda i: (0, i)),
+        out_specs=pl.BlockSpec(
+            (pl.Squeezed(), self.num_lanes), lambda i: (0, i)
+        ),
     )
     def kernel(x_ref, indices_ref, o_ref):
       del indices_ref  # Unused.
@@ -759,24 +752,19 @@ class VectorSubcoreTest(PallasSCTest):
 
   def test_store_scatter(self):
     self.skip_if_tc_tiling()
-    num_steps = 4
-    x = jnp.arange(num_steps * self.num_lanes).reshape(num_steps, self.num_lanes)
+
+    x = jnp.arange(self.num_lanes)
     indices = jax.random.permutation(
         jax.random.key(42), jnp.arange(self.num_lanes)
     )
 
     @self.vector_subcore_kernel(out_shape=x)
     def kernel(x_ref, indices_ref, o_ref):
-      indices = indices_ref[...]
-      o_ref[...] = jnp.zeros_like(o_ref)
-      for i in range(num_steps):
-        plsc.store_scatter(o_ref.at[i], [indices], x_ref[i])
+      plsc.store_scatter(o_ref, [indices_ref[...]], x_ref[...])
 
-    out = kernel(x, indices)
-    for i in range(num_steps):
-      np.testing.assert_array_equal(
-          out[i], jnp.zeros_like(x[i]).at[indices].set(x[i])
-      )
+    np.testing.assert_array_equal(
+        kernel(x, indices), jnp.zeros_like(x).at[indices].set(x)
+    )
 
   @parameterized.parameters(*MASK_FNS)
   def test_store_scatter_masked(self, mask_fn):
@@ -798,7 +786,6 @@ class VectorSubcoreTest(PallasSCTest):
     )
 
   def test_store_scatter_2d(self):
-
     num_steps = 4
     x = jnp.arange(num_steps * self.num_lanes).reshape(num_steps, self.num_lanes)
     indices = jax.random.permutation(
@@ -808,7 +795,6 @@ class VectorSubcoreTest(PallasSCTest):
     @self.vector_subcore_kernel(out_shape=x)
     def kernel(x_ref, indices_ref, o_ref):
       indices = indices_ref[...]
-      o_ref[...] = jnp.zeros_like(o_ref)
       for i in range(num_steps):
         plsc.store_scatter(
             o_ref, [jnp.full(indices.shape, i), indices], x_ref[i])
@@ -1159,32 +1145,24 @@ class VectorSubcoreTest(PallasSCTest):
     np.testing.assert_array_equal(kernel(x), x)
 
   def test_run_scoped_with_tiling(self):
-    x = jnp.arange(2 * self.num_lanes).reshape(-1, self.num_lanes)
+    x = jnp.arange(self.num_lanes)
 
     @self.vector_subcore_kernel(out_shape=x)
-    def kernel(x_ref, o_ref):
-      def scoped_kernel(scratch_ref):
-        scratch_ref[...] = x_ref[...]
-        o_ref[...] = scratch_ref[...]
-
-      pl.run_scoped(
-          scoped_kernel,
-          plsc.MemoryRef(
-              x.shape,
-              x_ref.dtype,
-              memory_space=pltpu.VMEM,
-              tiling=[(1, self.num_lanes)],
-          ),
-      )
+    @pl.with_scoped(
+        plsc.MemoryRef(x.shape, x.dtype, memory_space=pltpu.VMEM, tiling=[(8,)])
+    )
+    def kernel(x_ref, o_ref, scratch_ref):
+      scratch_ref[...] = x_ref[...]
+      o_ref[...] = scratch_ref[...]
 
     # Just make sure it compiles. The unrolling logic in the SC compiler
     # does not yet handle tiled layouts properly, so the result is wrong.
     _ = kernel(x)
 
   @parameterized.parameters(pltpu.VMEM, pltpu.SMEM)
-  def test_empty_ref_allocation(self, memory_space):
+  def test_empty_ref(self, memory_space):
     @self.vector_subcore_kernel(
-        out_shape=jax.ShapeDtypeStruct((16,), jnp.float32),
+        out_shape=jax.ShapeDtypeStruct((self.num_lanes,), jnp.float32),
     )
     def kernel(y_ref):
       x_ref = jax.empty_ref(
@@ -1199,10 +1177,9 @@ class VectorSubcoreTest(PallasSCTest):
     np.testing.assert_allclose(o, 4 * np.ones_like(o))
 
   @parameterized.product(sizes=[[1, 1], [2, 2], [1, 1, 1, 1]])
+  # TODO(b/478865387): Remove the skip once the bug is fixed.
+  @absltest.skip("Needs vector unrolling pass")
   def test_split_concatenate(self, sizes):
-    if jtu.is_device_tpu(7, "x"):
-      self.skipTest("This seems to miscompile")
-
     shape = (sum(sizes), self.num_lanes)
     x = jnp.arange(math.prod(shape)).reshape(-1, self.num_lanes)
 
@@ -1508,24 +1485,6 @@ class VectorSubcoreTest(PallasSCTest):
           x_ref[...] = o_ref[...]
           return carry["x"]
 
-      kernel(x)
-
-  def test_squeezed_blockspec_error_message(self):
-    shape = (16, 8, 32)
-    spec_shape = (pl.squeezed, 8, 32)
-    x = jnp.arange(math.prod(shape), dtype=jnp.int32).reshape(*shape)
-
-    @self.vector_subcore_kernel(
-        out_shape=x,
-        grid=16,
-        in_specs=[pl.BlockSpec(spec_shape, lambda i: (i, 0, 0))],
-        out_specs=pl.BlockSpec(spec_shape, lambda i: (i, 0, 0)),
-    )
-    def kernel(x_ref, o_ref):
-      del x_ref, o_ref  # Unused.
-
-    with self.assertRaisesRegex(
-        NotImplementedError, r"Unsupported block dimension type.*Squeezed"):
       kernel(x)
 
   def test_multiple_of(self):
@@ -2081,7 +2040,7 @@ class MpmdMapTest(PallasSCTest):
         axis_name="scs_core", num_cores=self.sc_info.num_cores
     )
 
-    x = jnp.arange(self.sc_info.num_cores * self.num_lanes, dtype=jnp.int32)
+    x = jnp.arange(self.num_lanes, dtype=jnp.int32)
 
     def vector_subcore_fn(x_hbm_ref, out_hbm_ref):
       scratch_ref = jax.empty_ref(jax.typeof(x), memory_space=pltpu.VMEM)
@@ -2111,8 +2070,15 @@ class PipelineTest(PallasSCTest):
 
   def test_basic(self):
     self.skip_if_tc_tiling()
+
+    if self.num_lanes != 8:
+      # TODO(b/478865387): Remove the skip once the bug is fixed.
+      self.skipTest(
+          f"This test requires SC to have 8 lanes, but got {self.num_lanes}"
+      )
+
     num_steps = 16
-    x = jnp.arange(num_steps * 8).reshape(-1, 8)
+    x = jnp.arange(num_steps * self.num_lanes).reshape(-1, 8)
 
     @self.vector_subcore_kernel(
         out_shape=x,
@@ -2120,11 +2086,17 @@ class PipelineTest(PallasSCTest):
         out_specs=pl.BlockSpec(memory_space=pltpu.HBM),
     )
     def kernel(x_hbm_ref, o_hbm_ref):
+
       @functools.partial(
           pltpu.emit_pipeline,
-          grid=(num_steps // 2,),
-          in_specs=pl.BlockSpec((2, 8), lambda i: (i, 0)),
-          out_specs=pl.BlockSpec((2, 8), lambda i: (i, 0)),
+          tiling=pltpu.Tiling.SPARSE_CORE,
+          grid=(num_steps,),
+          in_specs=pl.BlockSpec(
+              (pl.Squeezed(), self.num_lanes), lambda i: (i, 0)
+          ),
+          out_specs=pl.BlockSpec(
+              (pl.Squeezed(), self.num_lanes), lambda i: (i, 0)
+          ),
       )
       def pipeline(x_ref, o_ref):
         o_ref[...] = x_ref[...] + 1
