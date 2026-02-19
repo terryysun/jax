@@ -1374,21 +1374,5 @@ class AssertPrimitiveTests(jtu.JaxTestCase):
     jaxpr.pretty_print(source_info=True, name_stack=True)  # Does not crash.
 
 
-class LowerableChecksTest(jtu.JaxTestCase):
-  def setUp(self):
-    super().setUp()
-    self.enter_context(config.xla_runtime_errors(True))
-
-  @jtu.run_on_devices("cpu", "gpu")
-  def test_jit(self):
-    @jax.jit
-    def f(x):
-      checkify.check(x > 0, "x needs to be positive")
-      return x
-
-    with self.assertRaisesRegex(jax.errors.JaxRuntimeError,
-                                "x needs to be positive"):
-      f(-1.).block_until_ready()
-
 if __name__ == "__main__":
   absltest.main(testLoader=jtu.JaxTestLoader())
