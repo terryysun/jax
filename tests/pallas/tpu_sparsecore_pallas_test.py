@@ -1884,10 +1884,11 @@ class VectorSubcoreTestWithTCTiling(VectorSubcoreTest):
 class ScalarSubcoreTest(PallasSCTest):
 
   def test_pallas_call(self):
+    if not jtu.is_cloud_tpu_at_least(2026, 2, 22):
+      self.skipTest("Requires a newer libtpu")
+
     @functools.partial(
         pl.pallas_call,
-        # TODO(slebedev): grid= should not be required.
-        grid=(1,),
         out_shape=jax.ShapeDtypeStruct((self.num_lanes,), jnp.int32),
         compiler_params=pltpu.CompilerParams(
             kernel_type=pltpu.KernelType.SC_SCALAR_SUBCORE,
