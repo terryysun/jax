@@ -372,6 +372,15 @@ def prepare_wheel(wheel_sources_path: pathlib.Path, *, cpu, wheel_sources):
           ]
       ),
   )
+  copy_files(
+      dst_dir=mlir_libs_dir / "_mlir",
+      src_files=[
+          f"{source_file_prefix}jaxlib/mlir/_mlir_libs/_mlir/__init__.pyi",
+          f"{source_file_prefix}jaxlib/mlir/_mlir_libs/_mlir/ir.pyi",
+          f"{source_file_prefix}jaxlib/mlir/_mlir_libs/_mlir/passmanager.pyi",
+          f"{source_file_prefix}jaxlib/mlir/_mlir_libs/_mlir/rewrite.pyi",
+      ]
+  )
 
   triton_dir = jaxlib_dir / "triton"
   copy_files(
