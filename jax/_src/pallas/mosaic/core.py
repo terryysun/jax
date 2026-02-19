@@ -206,9 +206,6 @@ class MemorySpace(enum.Enum):
     return super().__getattr__(name)  # type: ignore
 
 
-# TODO(slebedev): Remove this after
-MemorySpace.ANY = pallas_core.MemorySpace.ANY
-
 class dma_semaphore(pallas_core.semaphore_dtype): pass
 
 class DMASemaphore(pallas_core.AbstractSemaphoreTy):
