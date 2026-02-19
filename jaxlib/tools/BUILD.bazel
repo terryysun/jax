@@ -155,6 +155,7 @@ wheel_sources(
         "//jaxlib",
         "//jaxlib:jaxlib_binaries",
         "//jaxlib:_jax",
+        "//jaxlib/mlir/_mlir_libs",
     ],
     hdr_srcs = [
         "@xla//xla/ffi/api:ffi",

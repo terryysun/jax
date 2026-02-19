@@ -13,12 +13,14 @@
 # limitations under the License.
 
 load("@rules_python//python:py_library.bzl", "py_library")
+load("//jaxlib:jax.bzl", "if_windows", "pytype_library")
 load(
-    "//jaxlib:jax.bzl",
-    "if_windows",
+    "//jaxlib:pywrap.bzl",
+    "nanobind_pywrap_extension",
+    "pywrap_binaries",
+    "pywrap_library",
 )
-load("//jaxlib:pywrap.bzl", "nanobind_pywrap_extension")
-load("//jaxlib:symlink_files.bzl", "symlink_inputs")
+load("//jaxlib:symlink_files.bzl", "symlink_files", "symlink_inputs")
 
 package(
     default_visibility = [
@@ -45,6 +47,53 @@ nanobind_pywrap_extension(
         "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
         "@nanobind",
     ],
+)
+
+pywrap_library(
+    name = "mlir_for_stubgen",
+    common_lib_def_files_or_filters = {
+        "jaxlib/mlir/_mlir_libs/mlir_for_stubgen_common": "mlir_for_stubgen.json",
+    },
+    visibility = ["//visibility:private"],
+    deps = [
+        ":_mlir",
+    ],
+)
+
+pywrap_binaries(
+    name = "mlir_for_stubgen_binaries",
+    dep = ":mlir_for_stubgen",
+    visibility = ["//visibility:private"],
+)
+
+symlink_files(
+    name = "stubgen_py",
+    srcs = ["@nanobind//:src/stubgen.py"],
+    dst = ".",
+    flatten = True,
+    visibility = ["//visibility:private"],
+)
+
+py_binary(
+    name = "stubgen",
+    srcs = [":stubgen_py"],
+    data = [":mlir_for_stubgen_binaries"],
+    main = "stubgen.py",
+    visibility = ["//visibility:private"],
+)
+
+genrule(
+    name = "_mlir_pyi",
+    outs = [
+        "_mlir/__init__.pyi",
+        "_mlir/ir.pyi",
+        "_mlir/passmanager.pyi",
+        "_mlir/rewrite.pyi",
+    ],
+    cmd = """
+        $(location :stubgen) -m jaxlib.mlir._mlir_libs._mlir -r -O $(RULEDIR)
+    """,
+    tools = [":stubgen"],
 )
 
 nanobind_pywrap_extension(
@@ -213,7 +262,8 @@ nanobind_pywrap_extension(
 
 symlink_inputs(
     name = "_mlir_libs",
-    rule = py_library,
+    pytype_srcs = ["_mlir_pyi"],
+    rule = pytype_library,
     symlinked_inputs = {"srcs": {
         ".": [
             "@llvm-project//mlir/python:MlirLibsPyFiles",

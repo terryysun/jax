@@ -137,10 +137,11 @@ jax_extra_deps = []
 jax_gpu_support_deps = []
 jax2tf_deps = []
 
-def pytype_library(name, pytype_srcs = None, **kwargs):
-    _ = pytype_srcs  # @unused
-    kwargs.pop("lazy_imports", None)
-    py_library(name = name, **kwargs)
+def pytype_library(name, pytype_srcs = [], **kwargs):
+    data = pytype_srcs + (kwargs["data"] if "data" in kwargs else [])
+    new_kwargs = {k: v for k, v in kwargs.items() if k != "data"}
+    new_kwargs.pop("lazy_imports", None)
+    py_library(name = name, data = data, **new_kwargs)
 
 def pytype_strict_library(name, pytype_srcs = [], **kwargs):
     data = pytype_srcs + (kwargs["data"] if "data" in kwargs else [])
