@@ -2976,6 +2976,13 @@ def _log1p_lowering_rule(ctx: LoweringRuleContext, x, accuracy):
   return math.log1p(x)
 
 
+@register_lowering_rule(lax.erf_p)
+def _erf_lowering_rule(ctx: LoweringRuleContext, x, accuracy):
+  if accuracy is not None:
+    raise NotImplementedError("Not implemented: accuracy")
+  return math.erf(x)
+
+
 @register_lowering_rule(lax.round_p)
 def _round_lowering_rule(ctx: LoweringRuleContext, x, *, rounding_method):
   if rounding_method == 0:
