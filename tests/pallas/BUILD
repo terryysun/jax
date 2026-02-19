@@ -919,8 +919,8 @@ jax_multiplatform_test(
     srcs = ["//jax/experimental/pallas/ops/gpu:attention_mgpu.py"],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100_x32",
-        "gpu_b200",
+        "gpu_h100_full",
+        "gpu_b200_full",
     ],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     tags = [
@@ -1007,7 +1007,7 @@ jax_multiplatform_test(
     name = "hopper_matmul_mgpu_run",
     srcs = ["//jax/experimental/pallas/ops/gpu:hopper_matmul_mgpu.py"],
     enable_backends = [],
-    enable_configs = ["gpu_h100"],
+    enable_configs = ["gpu_h100_full"],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     tags = [
         "manual",
@@ -1026,7 +1026,7 @@ jax_multiplatform_test(
     name = "hopper_mixed_type_matmul_mgpu_run",
     srcs = ["//jax/experimental/pallas/ops/gpu:hopper_mixed_type_matmul_mgpu.py"],
     enable_backends = [],
-    enable_configs = ["gpu_h100"],
+    enable_configs = ["gpu_h100_full"],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     tags = [
         "manual",
@@ -1045,7 +1045,7 @@ jax_multiplatform_test(
     name = "blackwell_matmul_mgpu_run",
     srcs = ["//jax/experimental/pallas/ops/gpu:blackwell_matmul_mgpu.py"],
     enable_backends = [],
-    enable_configs = ["gpu_b200"],
+    enable_configs = ["gpu_b200_full"],
     tags = [
         "manual",
         "notap",
@@ -1067,7 +1067,7 @@ jax_multiplatform_test(
         "//jax/experimental/pallas/ops/gpu:ragged_dot_mgpu.py",
     ],
     enable_backends = [],
-    enable_configs = ["gpu_b200"],
+    enable_configs = ["gpu_b200_full"],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     main = "//jax/experimental/pallas/ops/gpu:blackwell_ragged_dot_mgpu.py",
     tags = [
@@ -1088,9 +1088,8 @@ jax_multiplatform_test(
     srcs = ["//jax/experimental/pallas/ops/gpu:ragged_dot_mgpu.py"],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100_x32",
-        "gpu_h100",
-        "gpu_b200",
+        "gpu_h100_full",
+        "gpu_b200_full",
     ],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     tags = [
@@ -1110,8 +1109,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100_x32",
-        "gpu_h100",
+        "gpu_h100_full",
     ],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
     tags = [
@@ -1228,7 +1226,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
@@ -1251,7 +1249,7 @@ jax_multiplatform_test(
     srcs = ["//jax/experimental/pallas/ops/gpu:collective_matmul_mgpu.py"],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",
     ],
     tags = [
         "manual",
@@ -1274,7 +1272,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
@@ -1301,7 +1299,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100fullx2",
+        "gpu_h100x2_full",
     ],
     env = {
         "XLA_FLAGS": "--xla_gpu_experimental_enable_nvshmem=true",
