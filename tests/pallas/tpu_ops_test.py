@@ -761,18 +761,7 @@ class OpsTest(ptu.PallasTPUTest):
     unpacked_bitwidth = dtypes.itemsize_bits(unpacked_dtype)
     packed_bitwidth = dtypes.itemsize_bits(packed_dtype)
     num_sources = unpacked_bitwidth // packed_bitwidth
-    if jnp.issubdtype(unpacked_dtype, jnp.integer):
-      stacked_sources = jax.random.randint(
-          jax.random.key(0),
-          (num_sources, *shape),
-          minval=-1000,
-          maxval=1000,
-          dtype=jnp.int32,
-      ).astype(unpacked_dtype)
-    else:
-      stacked_sources = jax.random.uniform(
-          jax.random.key(0), (num_sources, *shape), dtype=unpacked_dtype
-      )
+    stacked_sources = jnp.asarray(rand((num_sources, *shape), unpacked_dtype))
     stacked_results = (
         stacked_sources.astype(packed_dtype)
         .view(getattr(jnp, f"uint{packed_bitwidth}"))
