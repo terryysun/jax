@@ -70,6 +70,11 @@ else
   FREETHREADED_FLAG_VALUE="no"
 fi
 
+OVERRIDE_XLA_REPO=""
+if [[ "$JAXCI_CLONE_MAIN_XLA" == 1 ]]; then
+  OVERRIDE_XLA_REPO="--override_repository=xla=${JAXCI_XLA_GIT_DIR}"
+fi
+
 # Get the CUDA major version only
 cuda_major_version="${JAXCI_CUDA_VERSION%%.*}"
 
@@ -105,6 +110,7 @@ bazel test --config=$TEST_CONFIG \
       $CACHE_OPTION \
       --repo_env=HERMETIC_PYTHON_VERSION="$JAXCI_HERMETIC_PYTHON_VERSION" \
       --@rules_python//python/config_settings:py_freethreaded="$FREETHREADED_FLAG_VALUE" \
+      $OVERRIDE_XLA_REPO \
       --//jax:build_jaxlib=$JAXCI_BUILD_JAXLIB \
       --//jax:build_jax=$JAXCI_BUILD_JAX \
       --test_env=XLA_PYTHON_CLIENT_ALLOCATOR=platform \
@@ -135,6 +141,7 @@ bazel test --config=$TEST_CONFIG \
       $CACHE_OPTION \
       --repo_env=HERMETIC_PYTHON_VERSION="$JAXCI_HERMETIC_PYTHON_VERSION" \
       --@rules_python//python/config_settings:py_freethreaded="$FREETHREADED_FLAG_VALUE" \
+      $OVERRIDE_XLA_REPO \
       --//jax:build_jaxlib=$JAXCI_BUILD_JAXLIB \
       --//jax:build_jax=$JAXCI_BUILD_JAX \
       --test_env=XLA_PYTHON_CLIENT_ALLOCATOR=platform \
