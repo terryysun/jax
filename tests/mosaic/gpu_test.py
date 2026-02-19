@@ -1667,6 +1667,113 @@ class TCGen05Test(TestCase, jtu.CudaArchSpecificTest):
       matches += 1
     self.assertEqual(matches, 128 * 4)
 
+  @parameterized.product(
+      jax_dtype=(jnp.float4_e2m1fn, jnp.float8_e5m2, jnp.float16, jnp.float32),
+      n=(8, 16, 32, 64, 128 + 32, 256),
+      swizzle=(32, 64, 128),
+  )
+  def test_smem_to_tmem_copy(self, jax_dtype, n, swizzle):
+    in_mlir_dtype = utils.dtype_to_ir_type(jax_dtype)
+    packing = 32 // bitwidth(in_mlir_dtype)
+    swizzle_elems = 8 * swizzle // bitwidth(in_mlir_dtype)
+    tiling = (8, swizzle_elems)
+    m = 128
+    if swizzle_elems > n:
+      self.skipTest(f"{n=} too short for {swizzle=} and {jax_dtype=}")
+    if n % swizzle_elems:
+      self.skipTest(f"{n=} not divisible by {swizzle_elems=}")
+
+    def kernel(ctx, src, out, scratch):
+      smem, barrier, copy_barrier, tmem = scratch
+      ctx.async_copy(
+          src_ref=src,
+          dst_ref=smem,
+          swizzle=swizzle,
+          gmem_transform=mgpu.TileTransform(tiling),
+          barrier=barrier,
+      )
+      barrier.wait()
+      with mgpu.single_thread():
+        tcgen05.async_copy_smem_to_tmem(smem, tmem, swizzle)
+        tcgen05.commit_arrive(copy_barrier)
+      copy_barrier.wait(orders_tensor_core=True)
+      tmem.load(fa.tmem_native_layout(packing)).store_untiled(out, optimized=False)
+
+    x = self.prng.uniform(-1, 1, (m, n)).astype(jax_dtype)
+    out_shape = jax.ShapeDtypeStruct((m, n), jax_dtype)
+    smem_shape = tile_shape((m, n), tiling)
+    scratch_shape = [
+        jax.ShapeDtypeStruct(smem_shape, jax_dtype),
+        mgpu.TMABarrier(),
+        mgpu.Barrier(1),
+        mgpu.TMEM((m, n), jax_dtype, packing=packing),
+    ]
+    z = mgpu.as_gpu_kernel(
+        kernel, (1, 1, 1), (128, 1, 1), x, out_shape, scratch_shape
+    )(x)
+    np.testing.assert_array_equal(x, z)
+
+  @parameterized.product(
+      jax_dtype=(jnp.float16,),
+      n=(64, 256),
+      swizzle=(32, 128),
+  )
+  def test_smem_to_tmem_copy_collective(self, jax_dtype, n, swizzle):
+    index = ir.IndexType.get()
+    in_mlir_dtype = utils.dtype_to_ir_type(jax_dtype)
+    packing = 32 // bitwidth(in_mlir_dtype)
+    swizzle_elems = 8 * swizzle // bitwidth(in_mlir_dtype)
+    tiling = (8, swizzle_elems)
+    m = 256
+    m_block = m // 2
+
+    def kernel(ctx, src, out, scratch):
+      smem, barrier, copy_barrier, cluster_barrier, tmem = scratch
+      block_id = gpu.cluster_block_id(gpu.Dimension.x)
+      is_leader_thread = single_thread_predicate()
+      is_first_block = arith.cmpi(
+          arith.CmpIPredicate.eq, block_id, c(0, index)
+      )
+      ctx.async_copy(
+          src_ref=src,
+          dst_ref=smem,
+          swizzle=swizzle,
+          gmem_transform=mgpu.TileTransform(tiling),
+          barrier=barrier,
+          collective=gpu.Dimension.x,
+          partitioned=0,
+      )
+      with when(is_first_block):
+        barrier.wait()
+      cluster_barrier.arrive(orders_tensor_core=True)
+      cluster_barrier.wait(orders_tensor_core=True)
+      with when(arith.andi(is_first_block, is_leader_thread)):
+        tcgen05.async_copy_smem_to_tmem(
+            smem, tmem, swizzle, collective=True
+        )
+        tcgen05.commit_arrive(copy_barrier, collective=True, ctx=ctx)
+      copy_barrier.wait(orders_tensor_core=True)
+      m_slice = ds(arith.muli(block_id, c(m_block, index)), m_block)
+      tmem.load(fa.tmem_native_layout(packing)).store_untiled(
+          memref_slice(out, m_slice), optimized=False
+      )
+
+    x = self.prng.uniform(-1, 1, (m, n)).astype(jax_dtype)
+    smem_shape = tile_shape((m_block, n), tiling)
+    out_shape = jax.ShapeDtypeStruct((m, n), jax_dtype)
+    scratch_shape = [
+        jax.ShapeDtypeStruct(smem_shape, jax_dtype),
+        mgpu.TMABarrier(),
+        mgpu.Barrier(1),
+        mgpu.ClusterBarrier(collective_dims=(gpu.Dimension.x,)),
+        mgpu.TMEM((m_block, n), jax_dtype, packing=packing, collective=True),
+    ]
+    z = mgpu.as_gpu_kernel(
+        kernel, (2, 1, 1), (128, 1, 1), x, out_shape, scratch_shape,
+        cluster=(2, 1, 1),
+    )(x)
+    np.testing.assert_array_equal(x, z)
+
   def _sample_scales(self, m, k, n, block_size, scale_jax_dtype):
     ka, kb = jax.random.split(jax.random.key(1234), 2)
     if scale_jax_dtype == jnp.float8_e8m0fnu:
