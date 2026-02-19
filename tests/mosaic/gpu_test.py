@@ -484,6 +484,26 @@ class MemRefTest(TestCase):
     )(scalar)
     np.testing.assert_array_equal(res, expected)
 
+  @jtu.thread_unsafe_test()  # Modifies `os.environ``.
+  def test_cluster_id_simplify(self):
+    def kernel(ctx, dst, _):
+      idx = mgpu.utils.cluster_idx(gpu.Dimension)  # type: ignore
+      idx = arith.index_cast(ir.IntegerType.get_signless(32), idx)
+      memref.store(idx, dst, [gpu.block_id(gpu.Dimension.y)])
+
+    out_ty = jax.ShapeDtypeStruct(shape=(8,), dtype=jnp.int32)
+    with jtu.set_env(MOSAIC_GPU_DUMP_PTX="1"), self.capture_stdout() as ptx:
+      f = mgpu.as_gpu_kernel(
+          kernel, (1, 8, 1), (128, 1, 1), (), out_ty, (), cluster=(1, 4, 1)
+      )
+      np.testing.assert_array_equal(f(), np.arange(8) % 4)
+    # Make sure MLIR/LLVM have simplified the calculation of cluster_idx and
+    # recognized that we only need the Y component.
+    self.assertEqual(ptx().count("%cluster_ctaid"), 1)
+    self.assertEqual(ptx().count("%ctaid"), 1)
+    self.assertEqual(ptx().count("%cluster_ctaid.y"), 1)
+    self.assertEqual(ptx().count("%ctaid.y"), 1)
+
   @parameterized.parameters(gpu.Dimension.x, gpu.Dimension.y)
   def test_cluster_ref(self, dim):
     index = ir.IndexType.get()
@@ -492,7 +512,7 @@ class MemRefTest(TestCase):
       smem, barrier = scratch
       cluster_idx = tuple(gpu.cluster_block_id(dim) for dim in dims)
       peer_idx = arith.subi(arith.constant(index, 1), cluster_idx[dim])
-      peer_smem = ctx.get_cluster_ref(smem, dim, peer_idx)
+      peer_smem = mgpu.get_cluster_ref(smem, dim, peer_idx)
       mgpu.FragmentedArray.load_strided(memref_slice(src, cluster_idx)).store_untiled(smem)
       utils.warpgroup_barrier()
       barrier.arrive()
@@ -2638,7 +2658,7 @@ class BarrierTest(TestCase):
       self.skipTest("Cluster too big")
     is_trivial = math.prod(cluster[d] for d in collective_dims) == 1
     def kernel(ctx, dst, mask, collective_barrier):
-      cluster_idx = ctx.cluster_idx()
+      cluster_idx = utils.cluster_idx()
       if not is_trivial:
         memref.store(collective_barrier.cluster_mask, mask, [cluster_idx])
       else:

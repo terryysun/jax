@@ -95,6 +95,7 @@ from .utils import (
     debug_print as debug_print,
     ds as ds,
     fori as fori,
+    get_cluster_ref as get_cluster_ref,
     is_known_divisible as is_known_divisible,
     memref_fold as memref_fold,
     memref_slice as memref_slice,

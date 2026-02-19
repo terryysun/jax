@@ -95,7 +95,7 @@ def build_kernel(
         arith.cmpi(arith.CmpIPredicate.eq, warp_idx, c(i, i32)), is_warp_leader
     )
     is_leader_block = arith.cmpi(
-        arith.CmpIPredicate.eq, ctx.cluster_idx(gpu.Dimension.x), c(0, index)
+        arith.CmpIPredicate.eq, gpu.cluster_block_id(gpu.Dimension.x), c(0, index)
     )
     is_store_warpgroup = arith.cmpi(
         arith.CmpIPredicate.eq, mgpu.warpgroup_idx(sync=True), c(1, i32)

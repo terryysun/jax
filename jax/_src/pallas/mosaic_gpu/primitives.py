@@ -596,7 +596,7 @@ def _copy_gmem_to_smem_lowering(
       if is_partitioned_copy:
         first_block = arith_dialect.cmpi(
             arith_dialect.CmpIPredicate.eq,
-            ctx.launch_ctx.cluster_idx(collective[0]),  # type: ignore
+            mgpu.utils.cluster_idx(collective[0]),  # type: ignore
             mgpu.c(0, ir.IndexType.get()),
         )
         barrier.arrive_expect_tx(bytes, predicate=first_block)
@@ -612,7 +612,7 @@ def _copy_gmem_to_smem_lowering(
       if is_partitioned_copy:
         first_block = arith_dialect.cmpi(
             arith_dialect.CmpIPredicate.eq,
-            ctx.launch_ctx.cluster_idx(collective[0]),  # type: ignore
+            mgpu.utils.cluster_idx(collective[0]),  # type: ignore
             mgpu.c(0, ir.IndexType.get()),
         )
         with mgpu.when(first_block):
@@ -2241,7 +2241,7 @@ def _collective_mma_predicate(ctx: lowering.LoweringRuleContext,
   index = ir.IndexType.get()
   is_leader_block = arith_dialect.cmpi(
       arith_dialect.CmpIPredicate.eq,
-      ctx.launch_ctx.cluster_idx(cluster_axis), mgpu.c(0, index))
+      mgpu.utils.cluster_idx(cluster_axis), mgpu.c(0, index))
   return is_leader_block
 
 
@@ -3746,7 +3746,7 @@ def try_cluster_cancel_lowering(
         is_first_cta,
         arith_dialect.cmpi(
             arith_dialect.CmpIPredicate.eq,
-            ctx.launch_ctx.cluster_idx(dim),
+            mgpu.utils.cluster_idx(dim),
             mgpu.c(0, ir.IndexType.get()),
         ),
     )
