@@ -176,9 +176,19 @@ def TPU_MemorySpace : I32EnumAttr<"MemorySpace", "Memory space", [
     let cppNamespace = "::mlir::tpu";
 }
 
-def TPU_MemorySpaceEnum
-    : EnumAttr<TPU_Dialect, TPU_MemorySpace, "memory_space"> {
-    let assemblyFormat = "`<` $value `>`";
+def TPU_MemorySpaceAttr : AttrDef<TPU_Dialect, "MemorySpace"> {
+  let mnemonic = "memory_space";
+  let cppNamespace = "::mlir::tpu";
+  let parameters = (ins
+    "::mlir::tpu::MemorySpace":$value,
+    OptionalParameter<"::std::optional<::mlir::tpu::CoreType>">:$core_type
+  );
+  let assemblyFormat = "`<` $value (`,` $core_type^)? `>`";
+  let builders = [
+    AttrBuilder<(ins "::mlir::tpu::MemorySpace":$value), [{
+        return get($_ctxt, value, std::nullopt);
+    }]>
+  ];
 }
 
 class TPU_Op<string mnemonic, list<Trait> traits = []> :
