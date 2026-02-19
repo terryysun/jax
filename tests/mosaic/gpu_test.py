@@ -3400,6 +3400,25 @@ class FragmentedArrayTest(TestCase):
         result, op(dtype(4.2).item() * iota, iota + 1), atol=2e-7
     )
 
+  def test_e8m0_reciprocal(self, m=64, n=128):
+    dtype = jnp.float8_e8m0fnu
+    layout = fa.WGMMA_LAYOUT
+
+    def kernel(ctx, inp, out, smem):
+      del ctx, smem
+      x = mgpu.FragmentedArray.load_untiled(inp, layout=layout, optimized=False)
+      (1 / x).store_untiled(out, optimized=False)
+
+    bits = self.prng.integers(low=0, high=255, size=(m, n), dtype=np.uint8)
+    # Inject a few NaNs
+    bits[0, 0] = 255
+    bits[1, 3] = 255
+    bits[m - 1, n - 1] = 255
+    x = jax.lax.bitcast_convert_type(jnp.array(bits, dtype=jnp.uint8), dtype)
+
+    y = mgpu.as_gpu_kernel(kernel, (1, 1, 1), (128, 1, 1), x, x, ())(x)
+    np.testing.assert_array_equal(y.astype(np.float32), 1 / x.astype(jnp.float32))
+
   @parameterized.product(
       op=[
           operator.lt,

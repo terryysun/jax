@@ -2380,6 +2380,8 @@ for op, si_pred, ui_pred, f_pred in [
 @register_lowering_rule(lax.integer_pow_p, mgpu.LoweringSemantics.Warpgroup)
 def _integer_pow_lowering_rule(ctx: LoweringRuleContext, x, y):
   [x_aval] = ctx.avals_in
+  if y == -1:
+    return _lower_fun(lambda x: 1 / x, multiple_results=False)(ctx, x)
   if y <= 1:
     raise NotImplementedError
 
