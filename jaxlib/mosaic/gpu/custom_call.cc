@@ -876,6 +876,9 @@ struct DeviceState {
   // Used for cross-device synchronization.
   std::vector<se::DeviceAddressBase> peer_barrier_signal_buffers;
 
+  // Memory used to store the current value of the cross-device barrier.
+  se::DeviceAddressBase barrier_signal_value_buffer;
+
   // Serialized collective kernel metadata.
   // Structure has the following layout:
   // [CollectiveKernelMetadata][param_to_peers][multimem_addresses]
@@ -1057,10 +1060,12 @@ absl::StatusOr<DeviceState> ConstructDeviceState(
   // because buffer assigner can use the same buffer for different ops and we
   // need to ensure that this buffer is zeroed between all devices for a given
   // operation.
-  const size_t barrier_signal_buffer_size = 2;
   se::DeviceAddressBase current_device_barrier =
-      collective_params.executor->AllocateArray<uint64_t>(
-          barrier_signal_buffer_size);
+      collective_params.executor->AllocateArray<uint8_t>(
+          xla::gpu::GetMultiGpuBarrierSignalBufferSize());
+  device_state.barrier_signal_value_buffer =
+      collective_params.executor->AllocateArray<uint8_t>(
+          xla::gpu::GetMultiGpuBarrierSignalValueSize());
   TF_RETURN_IF_ERROR(
       stream->MemZero(&current_device_barrier, current_device_barrier.size()));
 
@@ -1077,7 +1082,7 @@ absl::StatusOr<DeviceState> ConstructDeviceState(
   for (int peer = 0; peer < clique_key.num_devices(); ++peer) {
     device_state.peer_barrier_signal_buffers[peer] =
         se::DeviceAddressBase(param_to_peers[barrier_parameter_index + peer],
-                              barrier_signal_buffer_size * sizeof(uint64_t));
+                              xla::gpu::GetMultiGpuBarrierSignalBufferSize());
   }
 
   // Drop the addresses of the barrier buffers from the param_to_peers array,
@@ -1218,13 +1223,10 @@ absl::Status MosaicGpuExecute(
 
     VLOG(6) << "[" << current_rank
             << "] Starting multi-GPU barrier with key: " << clique_key;
-    se::DeviceAddressBase current_device_barrier =
-        device_state->peer_barrier_signal_buffers.at(current_rank.value());
-    se::DeviceAddressBase barrier_value_buffer =
-        current_device_barrier.GetByteSlice(sizeof(uint64_t), sizeof(uint64_t));
     TF_RETURN_IF_ERROR(xla::gpu::LaunchMultiGpuBarrier(
         stream, clique_key.num_devices(), current_rank,
-        device_state->peer_barrier_signal_buffers, barrier_value_buffer));
+        device_state->peer_barrier_signal_buffers,
+        device_state->barrier_signal_value_buffer));
     VLOG(6) << "[" << current_rank
             << "] Finished multi-GPU barrier with key: " << clique_key;
   } else if (kernel->is_comm_used) {
