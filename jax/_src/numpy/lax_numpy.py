@@ -2040,7 +2040,8 @@ def ravel(a: ArrayLike, order: str = "C", *, out_sharding=None) -> Array:
 
 @export
 def ravel_multi_index(multi_index: Sequence[ArrayLike], dims: Sequence[int],
-                      mode: str = 'raise', order: str = 'C') -> Array:
+                      mode: str = 'raise', order: str = 'C',
+                      *, dtype: DTypeLike | None = None) -> Array:
   """Convert multi-dimensional indices into flat indices.
 
   JAX implementation of :func:`numpy.ravel_multi_index`
@@ -2054,9 +2055,13 @@ def ravel_multi_index(multi_index: Sequence[ArrayLike], dims: Sequence[int],
         with :func:`~jax.jit` or other JAX transformations.
       - ``"clip"``: clip out-of-bound indices to valid range.
       - ``"wrap"``: wrap out-of-bound indices to valid range.
+      - ``"ignore"``: do not coerce or check input indices. Behavior is
+        undefined if indices are out of bounds.
 
     order: ``"C"`` (default) or ``"F"``, specify whether to assume C-style
       row-major order or Fortran-style column-major order.
+    dtype: the desired output dtype. If not specified, the dtype is determined
+      by standard type promotion rules of the input multi_index.
 
   Returns:
     array of flattened indices
@@ -2098,6 +2103,19 @@ def ravel_multi_index(multi_index: Sequence[ArrayLike], dims: Sequence[int],
   assert len(multi_index) == len(dims), f"len(multi_index)={len(multi_index)} != len(dims)={len(dims)}"
   dims = tuple(core.concrete_or_error(operator.index, d, "in `dims` argument of ravel_multi_index().") for d in dims)
   multi_index_arr = list(util.ensure_arraylike_tuple("ravel_multi_index", multi_index))
+
+  if dtype is None:
+    dtype = dtypes.result_type(int, *multi_index_arr)
+  else:
+    dtype = dtypes.check_and_canonicalize_user_dtype(dtype, "ravel_multi_index")
+  if not issubdtype(dtype, np.integer):
+    raise ValueError(f"{dtype=} is not an integer type.")
+  if math.prod(dims) - 1 > iinfo(dtype).max:
+    raise ValueError(
+      f"jnp.ravel_multi_index: {dtype=} not large enough to hold flattened"
+      f" index for {dims=}. Use the dtype argument to pass a suitable"
+      " dtype (e.g. dtype=np.min_scalar_type(prod(dims))).")
+
   for index in multi_index_arr:
     if mode == 'raise':
       core.concrete_or_error(array, index,
@@ -2112,8 +2130,10 @@ def ravel_multi_index(multi_index: Sequence[ArrayLike], dims: Sequence[int],
     multi_index_arr = [clip(i, 0, d - 1) for i, d in zip(multi_index_arr, dims)]
   elif mode == "wrap":
     multi_index_arr = [i % d for i, d in zip(multi_index_arr, dims)]
+  elif mode == "ignore":
+    pass
   else:
-    raise ValueError(f"invalid mode={mode!r}. Expected 'raise', 'wrap', or 'clip'")
+    raise ValueError(f"invalid mode={mode!r}. Expected 'raise', 'wrap', 'clip', or 'ignore'.")
 
   if order == "F":
     strides = np.cumprod((1,) + dims[:-1])
@@ -2122,9 +2142,9 @@ def ravel_multi_index(multi_index: Sequence[ArrayLike], dims: Sequence[int],
   else:
     raise ValueError(f"invalid order={order!r}. Expected 'C' or 'F'")
 
-  result = array(0, dtype=multi_index_arr[0].dtype if multi_index_arr else int)
+  result = array(0, dtype=dtype)
   for i, s in zip(multi_index_arr, strides):
-    result = result + i * int(s)
+    result = result + i.astype(dtype) * int(s)
   return result
 
 

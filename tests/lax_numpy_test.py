@@ -3848,6 +3848,24 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
       self._CompileAndCheck(jnp_fun, args_maker)
 
   @jtu.sample_product(
+    in_dtype=[jnp.int8, jnp.int16, jnp.int32, jnp.uint8, jnp.uint16],
+    out_dtype=[None, jnp.int32],
+    use_jit=[True, False],
+  )
+  def testRavelMultiIndexDtype(self, in_dtype, out_dtype, use_jit):
+    dims = (2, 3)
+    idx = jnp.array([0, 1], dtype=in_dtype)
+    indices = (idx, idx)
+    ravel_multi_index = partial(jnp.ravel_multi_index, dims=dims, mode='ignore', dtype=out_dtype)
+    if use_jit:
+      ravel_multi_index = jax.jit(ravel_multi_index)
+
+    expected_dtype = out_dtype or in_dtype
+    res = ravel_multi_index(indices)
+    self.assertEqual(res.dtype, expected_dtype)
+    self.assertFalse(res.weak_type)
+
+  @jtu.sample_product(
     ashape=((), (4,), (3, 4)),
     cshapes=[
       [(), (4,)],
