@@ -2758,6 +2758,37 @@ class PallasCallTest(ptu.PallasTPUTest):
     )(condlist, choicelist)
     np.testing.assert_array_equal(z, jnp.where(condlist, choicelist, 0))
 
+  def test_shard_map_check_vma(self):
+    shape = (128, 128)
+
+    def kernel(x_ref, y_ref):
+      x = x_ref[...]
+      # Check that vma is removed before entering the kernel.
+      assert x.vma == frozenset()
+      y_ref[...] = x_ref[...]
+
+    num_devices = jax.local_device_count()
+    devices = mesh_utils.create_device_mesh((num_devices,))
+    mesh = jax.make_mesh(
+        axis_shapes=[num_devices], axis_names=['x'], devices=devices
+    )
+    with jax.set_mesh(mesh):
+      x = jnp.zeros(shape, dtype=np.float32, out_sharding=P('x'))
+
+      @jax.jit
+      @shard_map.shard_map(mesh=mesh, out_specs=P('x'))
+      def inner(x):
+        return self.pallas_call(
+            kernel,
+            out_shape=jax.typeof(x),
+            in_specs=(pl.BlockSpec(),),
+            out_specs=pl.BlockSpec(),
+        )(x)
+
+      y = inner(x)
+      assert jax.typeof(y) == jax.typeof(x)
+      np.testing.assert_array_equal(x, y)
+
 
 class PallasScalarIOpsTest(ptu.PallasTPUTest):
 
