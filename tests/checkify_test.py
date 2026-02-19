@@ -959,7 +959,7 @@ class AssertPrimitiveTests(jtu.JaxTestCase):
     def f():
       checkify.check(False, "hi")
 
-    with self.assertRaisesRegex(ValueError, "Cannot abstractly evaluate"):
+    with self.assertRaisesRegex(ValueError, "Cannot lower"):
       f()
 
   def test_assert_primitive_jaxpr_effects(self):
