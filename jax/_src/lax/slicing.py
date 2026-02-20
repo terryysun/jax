@@ -1415,22 +1415,6 @@ def _slice_sharding_rule(operand, *, start_indices, limit_indices, strides):
                                 limit_indices=limit_indices, strides=strides)
   return _get_sharding_for_varying_out_shape(out_shape, operand, 'slicing')
 
-def _slice_transpose_rule(t, operand, *, start_indices, limit_indices, strides):
-  operand_shape = operand.aval.shape
-  if strides is None or np.all(np.equal(strides, 1)):
-    pads = zip(start_indices, np.subtract(operand_shape, limit_indices),
-               (0,) * len(start_indices))
-  else:
-    real_limits = np.add(
-      start_indices,
-      np.where(np.array(t.shape) == 0, 0,
-               np.add(1, np.multiply(np.subtract(t.shape, 1), strides))))
-    pads = zip(start_indices, np.subtract(operand_shape, real_limits),
-               np.subtract(strides, 1))
-  result = lax.pad(t, lax._const(t, 0), pads)  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
-  assert result.shape == operand_shape, f"{result.shape=} {operand_shape=}"
-  return [result]
-
 def _slice_jvp_rule(primals, tangents, *, start_indices, limit_indices, strides):
   (p,), (t,) = primals, tangents
   primal_out = slice_p.bind(p, start_indices=start_indices,
@@ -1553,19 +1537,6 @@ def _dynamic_slice_jvp(primals, tangents, *, slice_sizes):
   if type(tangent_out) is not ad_util.Zero:
     tangent_out = dynamic_slice_p.bind(tangent_out, *primals[1:], slice_sizes=slice_sizes)
   return dynamic_slice_p.bind(primals[0], *primals[1:], slice_sizes=slice_sizes), tangent_out
-
-def _dynamic_slice_transpose_rule(t, operand, *start_indices, slice_sizes):
-  assert ad.is_undefined_primal(operand)
-  assert all(not ad.is_undefined_primal(s) for s in start_indices)
-  operand_ct_aval = operand.aval.to_cotangent_aval()
-  if type(t) is ad_util.Zero:
-    return [ad_util.Zero(operand_ct_aval)] + [None] * len(start_indices)
-  else:
-    zeros = lax.full(operand.aval.shape, 0, operand.aval.dtype,
-                     sharding=operand_ct_aval.sharding)
-    zeros = core.pvary(zeros, tuple(operand.aval.vma))
-    return ([dynamic_update_slice_p.bind(zeros, t, *start_indices)] +
-            [None] * len(start_indices))
 
 def _dynamic_slice_transpose_fancy(out_ct, operand, *start_indices, slice_sizes):
   assert isinstance(operand, ad.GradAccum)
