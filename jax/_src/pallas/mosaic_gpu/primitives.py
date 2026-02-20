@@ -1646,7 +1646,7 @@ def tcgen05_mma(acc: _Ref,
                      sparse=is_sparse)
 
 
-@tcgen05_mma_p.def_abstract_eval
+@tcgen05_mma_p.def_effectful_abstract_eval
 def _tcgen05_mma_abstract_eval(acc, a, b, accumulate,
                                *barrier_scales_and_transforms_leaves,
                                acc_transforms_tree, a_transforms_tree,
@@ -1693,7 +1693,7 @@ def _tcgen05_mma_abstract_eval(acc, a, b, accumulate,
     if b_scale.memory_space != gpu_core.TMEM:
       raise ValueError("b_scale must be a TMEM Ref")
 
-  return []
+  return [], {gpu_core._memory_effect}
 
 
 @lowering.register_lowering_rule(tcgen05_mma_p, *gpu_core.LANExWG_SEMANTICS)
@@ -2142,7 +2142,7 @@ def tcgen05_commit_arrive(barrier: _Ref,
       collective_axis=collective_axis)
 
 
-@tcgen05_commit_arrive_p.def_abstract_eval
+@tcgen05_commit_arrive_p.def_effectful_abstract_eval
 def _tcgen05_commit_arrive_abstract_eval(barrier,
                                *barrier_transforms_leaves,
                                barrier_transforms_tree,
@@ -2152,7 +2152,7 @@ def _tcgen05_commit_arrive_abstract_eval(barrier,
       barrier.inner_aval.dtype, "orders_tensor_core", False)
   if not orders_tensor_core:
     raise ValueError("MMA barrier must have orders_tensor_core set to True.")
-  return []
+  return [], {gpu_core._memory_effect}
 
 
 @lowering.register_lowering_rule(

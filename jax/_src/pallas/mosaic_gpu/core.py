@@ -1384,6 +1384,7 @@ class MemoryEffect(jax_core.Effect):
   pass
 
 
+pallas_core.kernel_local_effects.add_type(MemoryEffect)
 effects.control_flow_allowed_effects.add_type(MemoryEffect)
 _memory_effect = MemoryEffect()
 
@@ -1392,6 +1393,7 @@ class _WGMMAPipelineEffect(effects.Effect):
   pass
 
 
+pallas_core.kernel_local_effects.add_type(_WGMMAPipelineEffect)
 effects.control_flow_allowed_effects.add_type(_WGMMAPipelineEffect)
 _wgmma_pipeline_effect = _WGMMAPipelineEffect()
 

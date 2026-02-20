@@ -167,6 +167,8 @@ def _bcast_to(a: ir.Value, shape: tuple[int, ...]) -> ir.Value:
     a_type = ir.RankedTensorType(a.type)
     if a_type.shape == [*shape]:
       return a
+    for _ in range(a_type.rank, len(shape)):
+      a = _expand_dims(a, 0)
     if a_type.rank != len(shape) or not all(
         a_type.shape[i] in (dim, 1) for i, dim in enumerate(shape)
     ):
@@ -429,6 +431,11 @@ def lower_jaxpr_to_triton_ir(
           f"msg={e}"
       ) from e
     if eqn.primitive.multiple_results:
+      if len(eqn.outvars) != len(outvals):
+        raise ValueError(
+            f"Primitive {eqn.primitive.name} has multiple results, but "
+            f"{len(eqn.outvars)} outvars do not match {len(outvals)} outvals."
+        )
       foreach(write_env, eqn.outvars, outvals)
     else:
       write_env(eqn.outvars[0], outvals)
@@ -2628,19 +2635,19 @@ def _scan_lowering_rule(
 ):
   del _split_transpose
   # Only implements fori_loop-like scans
-  num_extensive = len(args) - num_consts - num_carry
-  if num_extensive: raise NotImplementedError
   if reverse: raise NotImplementedError
   if unroll != 1: raise NotImplementedError
-  del linear, num_extensive, unroll, reverse
+  del linear, unroll, reverse
 
   jaxpr, jaxpr_consts = jaxpr.jaxpr, jaxpr.consts
   if jaxpr_consts: raise NotImplementedError
   del jaxpr_consts
 
+  print("PRE JAXPR", jaxpr)
   jaxpr, has_loop_index = (
       pallas_utils.pattern_match_scan_to_fori_loop(jaxpr, num_consts, num_carry)
   )
+  print("POST JAXPR", jaxpr, has_loop_index)
   args = map(_ensure_ir_value, args, ctx.avals_in)
   consts, args = util.split_list(args, [num_consts])  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
   if has_loop_index:

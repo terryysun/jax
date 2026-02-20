@@ -15,16 +15,16 @@
 """Pallas utility functions."""
 
 from __future__ import annotations
+
 import dataclasses
 from typing import Any, overload
 
-from jax._src.lax import lax
 from jax._src import core as jax_core
 from jax._src import dtypes
-from jax._src import typing as jax_typing
-
-from jax._src.util import split_list
 from jax._src import numpy as jnp
+from jax._src import typing as jax_typing
+from jax._src.lax import lax
+from jax._src.util import split_list
 import numpy as np
 
 
@@ -77,6 +77,19 @@ def next_power_of_2(x: int) -> int:
 def pattern_match_scan_to_fori_loop(
     jaxpr: jax_core.Jaxpr, num_consts: int, num_carry: int
 ) -> tuple[jax_core.Jaxpr, bool]:
+  num_extensive_inputs = len(jaxpr.invars) - num_consts - num_carry
+  num_extensive_outputs = len(jaxpr.outvars) - num_carry
+  if num_extensive_outputs:
+    raise ValueError(
+        f"Scan with {num_extensive_outputs} extensive output(s) is not"
+        " supported."
+    )
+  if num_extensive_inputs:
+    raise ValueError(
+        f"Scan with {num_extensive_inputs} extensive argument(s) is not"
+        f" supported. Found {num_consts} consts and {num_carry} carry"
+        " arguments."
+    )
   if num_carry > 0:
     # Pattern match onto fori_loop:
     # We expect the first carry argument to the jaxpr to be the loop index and
@@ -86,12 +99,10 @@ def pattern_match_scan_to_fori_loop(
     # Check that the loop index argument is an int32 scalar
     if (in_index_var.aval.shape or
         in_index_var.aval.dtype not in (jnp.int32, jnp.int64)):
-      raise NotImplementedError(
-          f"not a fori_loop index in: {in_index_var.aval} {jaxpr=}")
-    if (out_index_var.aval.shape or
-        out_index_var.aval.dtype not in (jnp.int32, jnp.int64)):
-      raise NotImplementedError(
-          f"not a fori_loop index out: {out_index_var.aval} {jaxpr=}")
+      # The loop index is not an int32 scalar so we assume that the loop index
+      # has been DCEd and the body does *not* expect a loop index as an
+      # argument.
+      return jaxpr, False
     # Look for the equation that increments the loop index
     for i, eqn in enumerate(jaxpr.eqns):
       if eqn.primitive == lax.add_p:
@@ -102,7 +113,10 @@ def pattern_match_scan_to_fori_loop(
                 eqn_index = i
                 break
     else:
-      raise NotImplementedError("Unable to match fori_loop pattern")
+      # If we didn't find the equation that increments the loop index, we assume
+      # that the loop index has been DCEd and the body does *not* expect a loop
+      # index as an argument.
+      return jaxpr, False
     # Delete the equation that increments and remove the loop index from the
     # output. Incrementing the loop index will be done implicitly.
     jaxpr = jaxpr.replace(
