@@ -24,6 +24,7 @@ import numpy as np
 from jax._src import ad_checkpoint
 from jax._src import api
 from jax._src import api_util
+from jax._src import callback
 from jax._src import config
 from jax._src import core
 from jax._src import custom_derivatives
@@ -504,15 +505,45 @@ def check_abstract_eval(*args, err_tree, debug):
 
 # TODO(lenamartens) add in-depth error explanation to link to in module docs.
 functionalization_error = ValueError(
-    'Cannot lower a checkify.check which was not functionalized. This probably '
-    'means you tried to stage (jit/scan/...) a `check` without functionalizing '
-    'it through `checkify.checkify`.')
+    'Cannot abstractly evaluate a checkify.check which was not'
+    ' functionalized. This probably means you tried to stage'
+    ' (jit/scan/pmap/...) a `check` without functionalizing it'
+    ' through `checkify.checkify`.'
+    )
+
+def check_lowering_rule(ctx, *args, err_tree, debug):
+  if debug:
+    # NOOP (check will only trigger when discharged)
+    return []
+  if not config.xla_runtime_errors.value:
+    raise functionalization_error
+
+  out_op, _, _ = callback.emit_python_callback(
+      ctx, callback=functools.partial(python_err, err_tree),
+      token=None,
+      operands=args,
+      operand_avals=list(ctx.avals_in),
+      result_avals=list(ctx.avals_out),
+      has_side_effect=True,
+      returns_token=False)
+  return out_op
 
 def check_lowering_rule_unsupported(*a, debug, **k):
   if debug:
     return []
   raise functionalization_error
-mlir.register_lowering(check_p, check_lowering_rule_unsupported)
+
+def python_err(err_tree, *args):
+  error = tree_unflatten(err_tree, args)
+  _check_error(error)
+  return []
+
+mlir.register_lowering(check_p, check_lowering_rule_unsupported,
+                       platform='tpu')
+mlir.register_lowering(check_p, check_lowering_rule,
+                       platform='cpu')
+mlir.register_lowering(check_p, check_lowering_rule,
+                       platform='gpu')
 
 def check_batching_rule(batched_args, batch_dims, *, err_tree, debug):
   size = next(x.shape[dim] for x, dim in zip(batched_args, batch_dims)

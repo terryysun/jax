@@ -1867,6 +1867,16 @@ disable_bwd_checks = bool_state(
     upgrade=True,
     help='Disables all bwd pass checks')
 
+xla_runtime_errors = bool_state(
+    name='jax_experimental_unsafe_xla_runtime_errors',
+    default=False,
+    help=('Enable XLA runtime errors for jax.experimental.checkify.checks '
+          'on CPU and GPU. These errors are async, might get lost and are not '
+          'very readable. But, they crash the computation and enable you '
+          'to write jittable checks without needing to checkify. Does not '
+          'work under pmap/pjit.')
+)
+
 jax_xla_profile_version = int_state(
     name='jax_xla_profile_version',
     default=0,
