@@ -38,17 +38,13 @@ jax_generate_backend_suites()
 jax_multiplatform_test(
     name = "gpu_test",
     srcs = ["gpu_test.py"],
-    config_tags_overrides = {
-        # TODO(b/448760413): Re-enable once llvm fixed.
-        "gpu_b200": {"notap": True},
-    },
     enable_backends = [],
     enable_configs = [
         "gpu_h100",
         "gpu_b200",
     ],
     env = {"XLA_FLAGS": "--xla_gpu_autotune_level=0 --xla_gpu_enable_triton_gemm=0"},
-    shard_count = 8,
+    shard_count = 16,
     tags = [
         "noasan",  # Times out.
     ],
