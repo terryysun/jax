@@ -2955,6 +2955,22 @@ def _tan_lowering_rule(ctx: LoweringRuleContext, x, accuracy):
   return math.tan(x)
 
 
+@register_lowering_rule(lax.atan2_p, ensure_mlir_values=False)
+def _atan2_lowering_rule(ctx: LoweringRuleContext, x, y, accuracy):
+  if accuracy is not None:
+    raise NotImplementedError("Not implemented: accuracy")
+
+  x, y = _bcast(
+      x,
+      y,
+      ctx.avals_in[0],
+      ctx.avals_in[1],
+      ctx.avals_out[0],
+      ctx.lowering_context.dynamic_shape_replacement_fn,
+  )
+  return math.atan2(x, y)
+
+
 @register_lowering_rule(lax.tanh_p)
 def _tanh_lowering_rule(ctx: LoweringRuleContext, x, accuracy):
   if accuracy is not None:
