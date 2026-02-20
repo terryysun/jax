@@ -30,7 +30,7 @@ from jax._src.core import typeof
 from jax._src.interpreters import ad
 from jax._src.interpreters import batching
 from jax._src.interpreters import partial_eval as pe
-from jax._src.custom_derivatives import CustomVJPPrimal
+from jax._src.custom_derivatives import CustomVJPPrimal, _temporary_dtype_exception
 from jax._src.errors import UnexpectedTracerError
 from jax._src.state.types import AbstractRef
 from jax._src import ad_util
@@ -409,7 +409,7 @@ class VJPHiPrimitive:
 
   def __call__(self, *args):
     args_flat = tree_leaves_checked(self.in_tree, args)
-    ans_flat = call_hi_primitive_p.bind(*args_flat, prim=self)
+    ans_flat = call_hi_primitive_p.bind(*args_flat, _prim=self)
     return tree_unflatten(self.out_tree, ans_flat)
 
   def check(self, *arg_tys):
@@ -418,7 +418,7 @@ class VJPHiPrimitive:
   def staging(self, trace, source_info, *args):
     args_flat = tree_leaves_checked(self.in_tree, args)
     ans_flat = trace.default_process_primitive(
-        call_hi_primitive_p, args_flat, dict(prim=self), source_info)
+        call_hi_primitive_p, args_flat, dict(_prim=self), source_info)
     return tree_unflatten(self.out_tree, ans_flat)
 
   def __repr__(self):
@@ -431,6 +431,11 @@ class VJPHiPrimitive:
     return type(self) is type(other) and self.params == other.params
 
 class VmapOf(VJPHiPrimitive):
+  prim: core.Primitive
+  axis_data: batching.AxisData
+  in_dims: Any
+  out_dim: Any
+
   def __init__(self, prim, axis_data, in_dims, out_dim):
     unmap = lambda a, d: core.unmapped_aval(axis_data.size, d, a,
                                             axis_data.explicit_mesh_axis)
@@ -495,41 +500,41 @@ def unmap_zero(axis_data, d, ct):
 
 call_hi_primitive_p = core.Primitive("call_hi_primitive")
 call_hi_primitive_p.multiple_results = True
-call_hi_primitive_p.is_high = lambda *args, prim: True  # type: ignore
+call_hi_primitive_p.is_high = lambda *args, _prim: True  # type: ignore
 @call_hi_primitive_p.def_abstract_eval
-def _call_hi_primitive_abstract_eval(*_args, prim):
-  return prim.out_avals_flat
+def _call_hi_primitive_abstract_eval(*_args, _prim):
+  return _prim.out_avals_flat
 
-def _call_hi_primitive_staging(trace, source_info, *args_flat, prim):
+def _call_hi_primitive_staging(trace, source_info, *args_flat, _prim):
   trace.frame.is_high = True
-  args = tree_unflatten(prim.in_tree, args_flat)
-  ans = prim.staging(trace, source_info, *args)
-  return tree_leaves_checked(prim.out_tree, ans)
+  args = tree_unflatten(_prim.in_tree, args_flat)
+  ans = _prim.staging(trace, source_info, *args)
+  return tree_leaves_checked(_prim.out_tree, ans)
 pe.custom_staging_rules[call_hi_primitive_p] = _call_hi_primitive_staging
 
-def _call_hi_primitive_to_lojax(*args_flat, prim):
-  args = tree_unflatten(prim.in_tree, args_flat)
-  ans = prim.expand(*args)
-  return tree_leaves_checked(prim.out_tree, ans)
+def _call_hi_primitive_to_lojax(*args_flat, _prim):
+  args = tree_unflatten(_prim.in_tree, args_flat)
+  ans = _prim.expand(*args)
+  return tree_leaves_checked(_prim.out_tree, ans)
 call_hi_primitive_p.to_lojax = _call_hi_primitive_to_lojax
 
-def _call_hi_primitive_batcher(axis_data, args_flat, dims_flat, prim):
-  args = tree_unflatten(prim.in_tree, args_flat)
-  dims = tree_unflatten(prim.in_tree, dims_flat)
-  ans, dims = prim.batch(axis_data, args, dims)
-  ans_flat = tree_leaves_checked(prim.out_tree, ans)
-  dims_flat = prim.out_tree.flatten_up_to(dims)
+def _call_hi_primitive_batcher(axis_data, args_flat, dims_flat, _prim):
+  args = tree_unflatten(_prim.in_tree, args_flat)
+  dims = tree_unflatten(_prim.in_tree, dims_flat)
+  ans, dims = _prim.batch(axis_data, args, dims)
+  ans_flat = tree_leaves_checked(_prim.out_tree, ans)
+  dims_flat = _prim.out_tree.flatten_up_to(dims)
   return ans_flat, dims_flat
 batching.fancy_primitive_batchers[call_hi_primitive_p] = _call_hi_primitive_batcher
 
-def _call_hi_primitive_linearize(nz_in_flat, *args_flat, prim):
-  args = tree_unflatten(prim.in_tree, args_flat)
-  nzs_in = tree_unflatten(prim.in_tree, nz_in_flat)
-  ans, residuals, *maybe_nzs_out = prim.vjp_fwd(nzs_in, *args)
-  ans_flat = tree_leaves_checked(prim.out_tree, ans)
+def _call_hi_primitive_linearize(nz_in_flat, *args_flat, _prim):
+  args = tree_unflatten(_prim.in_tree, args_flat)
+  nzs_in = tree_unflatten(_prim.in_tree, nz_in_flat)
+  ans, residuals, *maybe_nzs_out = _prim.vjp_fwd(nzs_in, *args)
+  ans_flat = tree_leaves_checked(_prim.out_tree, ans)
   nzs_out = True if maybe_nzs_out == [] else maybe_nzs_out[0]
   nzs_out_flat = broadcast_prefix(nzs_out, ans)
-  linearized = partial(fake_linear_op, prim, nz_in_flat)
+  linearized = partial(fake_linear_op, _prim, nz_in_flat)
   return (ans_flat, nzs_out_flat, residuals, linearized)
 
 def fake_linear_op(prim, nz_in_flat, rs, *tangents):
@@ -537,41 +542,42 @@ def fake_linear_op(prim, nz_in_flat, rs, *tangents):
   assert nz_in_flat == [not isinstance(t, ad_util.Zero) for t in tangents]
   nz_tangents = tree_leaves(tangents)
   return call_hi_primitive_linearized_p.bind(
-      *residuals_flat, *nz_tangents, residuals_tree=residuals_tree, prim=prim,
+      *residuals_flat, *nz_tangents, residuals_tree=residuals_tree, _prim=prim,
       nz_in_flat=tuple(nz_in_flat))
 
 ad.primitive_linearizations[call_hi_primitive_p] = _call_hi_primitive_linearize
 
 call_hi_primitive_linearized_p = core.Primitive("call_hi_primitive_linearized")
 call_hi_primitive_linearized_p.multiple_results = True
-call_hi_primitive_linearized_p.is_high = lambda *args, prim, **_: True  # type: ignore
+call_hi_primitive_linearized_p.is_high = lambda *args, _prim, **_: True  # type: ignore
 @call_hi_primitive_linearized_p.def_abstract_eval
-def _call_hi_primitive_linearized_abstract_eval(*_args, prim, residuals_tree, nz_in_flat):
-  return [t.to_tangent_aval() for t in prim.out_avals_flat]  # TODO(dougalm): handle nonzeros
+def _call_hi_primitive_linearized_abstract_eval(*_args, _prim, residuals_tree, nz_in_flat):
+  return [t.to_tangent_aval() for t in _prim.out_avals_flat]  # TODO(dougalm): handle nonzeros
 
-def _call_hi_primitive_linearized_transpose(cts_flat, *args, prim, residuals_tree, nz_in_flat):
+def _call_hi_primitive_linearized_transpose(cts_flat, *args, _prim,
+                                            residuals_tree, nz_in_flat):
   residuals_flat, accums_flat = split_list(args, [residuals_tree.num_leaves])
   residuals = tree_unflatten(residuals_tree, residuals_flat)
   accums_flat_ = iter(accums_flat)
   accums_flat = [next(accums_flat_) if nz else ad.NullAccum() for nz in nz_in_flat]
   assert next(accums_flat_, None) is None
-  accums = tree_unflatten(prim.in_tree, accums_flat)
-  cts = tree_unflatten(prim.out_tree, cts_flat)
-  none = prim.vjp_bwd(residuals, cts, *accums)
+  accums = tree_unflatten(_prim.in_tree, accums_flat)
+  cts = tree_unflatten(_prim.out_tree, cts_flat)
+  none = _prim.vjp_bwd(residuals, cts, *accums)
   assert none is None
 ad.fancy_transposes[call_hi_primitive_linearized_p] = _call_hi_primitive_linearized_transpose
 
-def _call_hi_primitive_jvp(primals, tangents, *, prim):
-  primals = tree_unflatten(prim.in_tree, primals)
-  tangents = tree_unflatten(prim.in_tree, tangents)
-  out_primals, out_tangents = prim.jvp(primals, tangents)
-  out_primals_flat = tree_leaves_checked(prim.out_tree, out_primals)
-  out_tangents_flat = prim.out_tree.flatten_up_to(out_tangents)
+def _call_hi_primitive_jvp(primals, tangents, *, _prim):
+  primals = tree_unflatten(_prim.in_tree, primals)
+  tangents = tree_unflatten(_prim.in_tree, tangents)
+  out_primals, out_tangents = _prim.jvp(primals, tangents)
+  out_primals_flat = tree_leaves_checked(_prim.out_tree, out_primals)
+  out_tangents_flat = _prim.out_tree.flatten_up_to(out_tangents)
   return out_primals_flat, out_tangents_flat
 ad.primitive_jvps[call_hi_primitive_p] = _call_hi_primitive_jvp
 
 def _call_hi_primitive_dce(used_outs_flat, eqn):
-  if hasattr(prim := eqn.params['prim'], 'dce'):
+  if hasattr(prim := eqn.params['_prim'], 'dce'):
     return prim.dce(used_outs_flat, eqn)
   else:
     return pe._default_dce_rule(used_outs_flat, eqn)
@@ -582,6 +588,13 @@ batching.fancy_primitive_batchers[call_hi_primitive_linearized_p] = ad.raise_cus
 
 
 class CustomVJPTraced(VJPHiPrimitive):
+  traced: Any
+  fwd: Any
+  bwd: Any
+  symbolic_zeros: Any
+  static_argnums: Any
+  opt_remat: bool
+
   def __init__(self, traced, fwd, bwd, in_avals, sym_zeros, static_argnums, opt_remat):
     self.in_avals = in_avals
     self.out_aval = traced.out_avals
@@ -676,16 +689,22 @@ def _vjp_fwd_aval_mismatch_err(path, primal_aval, fwd_val):
     raise TypeError(f"at {keystr(path)}, got fwd output type {ty.str_short()} "
                     f"which doesn't match primal output type {primal_aval.str_short()}")
 
-def _vjp_bwd_aval_mismatch_err(path, primal_aval, ct_val):
-  if config.disable_bwd_checks.value: return
-  if isinstance(ct_val, ad_util.Zero): return
-  if isinstance(primal_aval, AbstractRef): primal_aval = primal_aval.inner_aval
+def _vjp_bwd_aval_mismatch_err(path, primal_aval, ct):
+  if config.disable_bwd_checks.value:
+    return
+  if isinstance(ct, ad_util.Zero):
+    return
+  if isinstance(primal_aval, AbstractRef):
+    primal_aval = primal_aval.inner_aval
   expected = primal_aval.to_cotangent_aval()
-  ty = ct_val.aval if isinstance(ct_val, ad_util.SymbolicZero) else typeof(ct_val)
-  if not core.typematch(ty, expected) and getattr(expected, 'dtype', None) is not dtypes.float0:
+  ct_aval = ct.aval if isinstance(ct, ad_util.SymbolicZero) else typeof(ct)
+  if (not core.typematch(expected, ct_aval) and
+      not _temporary_dtype_exception(expected, ct_aval) and
+      getattr(expected, 'dtype', None) is not dtypes.float0):
     result = f"at output{keystr(path)} " if path else ""
-    raise ValueError(f"{result}the bwd rule produced an output of type {ty.str_short()} "
-                     f"which doesn't match expected type {expected.str_short()}")
+    raise ValueError(
+        f"{result}the bwd rule produced an output of type {ct_aval.str_short()}"
+        f" which doesn't match expected type {expected.str_short()}")
 
 def _replace_none(primal_in_aval, maybe_ct):
   if maybe_ct is None:
@@ -732,8 +751,8 @@ class custom_vjp3:
     return prim(*args)
 
 class OptRemat(VJPHiPrimitive):
-  traced_fwd: Any
   traced_primal: Any
+  traced_fwd: Any
 
   def __init__(self, traced_primal, traced_fwd):
     self.in_avals, _ = traced_primal.in_avals
@@ -747,13 +766,20 @@ class OptRemat(VJPHiPrimitive):
   def dce(self, used_outs, eqn):
     num_primals_in = len(self.traced_primal.jaxpr.in_avals)
     num_primals_out = len(self.traced_primal.jaxpr.out_avals)
-    _, used_res = split_list(used_outs, [num_primals_out])
+    used_prims, used_res = split_list(used_outs, [num_primals_out])
     if any(used_res):
       return [True] * num_primals_in, eqn
     else:
+      new_jaxpr, used_consts, used_ins = pe.dce_jaxpr_consts(
+          self.traced_primal.jaxpr.jaxpr, used_prims)
+      consts = self.traced_primal.jaxpr.consts
+      consts = [c for used, c in zip(used_consts, consts) if used]
+      closed_jaxpr = core.ClosedJaxpr(new_jaxpr, consts)
+      _, invars = split_list(eqn.invars, [len(consts)])
+      invars = [v for used, v in zip(used_ins, invars) if used]
       outvars = [v for used, v in zip(used_outs, eqn.outvars) if used]
       primal_eqn = pe.new_jaxpr_eqn(
-          eqn.invars, outvars, core.closed_call_p, dict(call_jaxpr=self.traced_primal.jaxpr),
+          invars, outvars, core.closed_call_p, dict(call_jaxpr=closed_jaxpr),
           self.traced_primal.jaxpr.effects, eqn.source_info, eqn.ctx)
       return [True] * num_primals_in, primal_eqn
 

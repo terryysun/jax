@@ -3417,7 +3417,8 @@ def _check_jaxpr(
                                f"Jaxpr effects: {jaxpr.effects}")
 
       # Check out_type matches the let-binders' annotation (after substitution).
-      out_type = [t if isinstance(t, AvalQDD) else AvalQDD(t, None) for t in out_type]
+      out_type = [t if isinstance(t, AvalQDD) else AvalQDD(t, None)
+                  for t in out_type]
       foreach(write, eqn.outvars, out_type)
 
     except JaxprTypeError as e:
@@ -3481,14 +3482,12 @@ def _check_call(ctx_factory, prim, in_atoms, params):
   check_jaxpr(call_jaxpr)
 
   out_avals = [x.aval for x in call_jaxpr.outvars]
-  out_type = out_avals
   # jaxpr input effects are indexed to include jaxpr.constvars, but the eqn
   # should have effects indexed only on its explicit arguments
   effs = {e.replace(input_index=e.input_index - len(call_jaxpr.constvars))
           if isinstance(e, effects.JaxprInputEffect)
           else e for e in call_jaxpr.effects}
-
-  return out_type, effs
+  return out_avals, effs
 
 def _check_map(ctx_factory, prim, in_avals, params):
   if "call_jaxpr" not in params:

@@ -2067,7 +2067,7 @@ class DynamicJaxprTrace(core.Trace):
     # effectful abstract_eval rules.
     # TODO(mattjj,dougalm): clean up how we check for new-style hi primitives
     if primitive is call_hi_primitive_p:
-      out_avals, effs = params['prim'].out_avals_flat, set()  # TODO effs
+      out_avals, effs = params['_prim'].out_avals_flat, set()  # TODO effs
     elif (primitive.name in ("custom_lin", "call_hi_primitive_linearized") or
           primitive.is_effectful and primitive.is_effectful(params)):
       out_avals, effs = primitive.abstract_eval(*aval_qdds, **params)
