@@ -487,7 +487,7 @@ jax_multiplatform_test(
     srcs = ["gpu_pallas_distributed_test.py"],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",  # We need a 2 physical GPUs since otherwise the test will be skipped
         "gpu_b200x2",
     ],
     tags = [
@@ -1156,7 +1156,7 @@ jax_multiplatform_test(
     ],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",
         "gpu_b200x2",
     ],
     env = {
@@ -1182,7 +1182,7 @@ jax_multiplatform_test(
     srcs = ["mgpu_collective_matmul_test.py"],
     enable_backends = [],
     enable_configs = [
-        "gpu_h100x2",
+        "gpu_h100x2_full",  # We need a 2 physical GPUs since otherwise the test will be skipped
         "gpu_b200x2",
     ],
     tags = [
