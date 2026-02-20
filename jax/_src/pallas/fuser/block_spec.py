@@ -2067,15 +2067,15 @@ def _custom_vjp_call_pull_block_spec_rule(
 
 @register_pull_block_spec_rule(hijax.call_hi_primitive_p)
 def _custom_call_hi_primitive_pull_block_spec_rule(
-    ctx: PullRuleContext, out_block_specs, *, prim
+    ctx: PullRuleContext, out_block_specs, *, _prim
 ):
-  return prim.pull_block_spec_rule(ctx, out_block_specs)
+  return _prim.pull_block_spec_rule(ctx, out_block_specs)
 
 @register_eval_rule(hijax.call_hi_primitive_p)
 def _custom_call_hi_primitive_eval_rule(
-    ctx: KernelEvalContext, *args, prim
+    ctx: KernelEvalContext, *args, _prim
 ):
-  return jax.tree.leaves(prim.block_eval_rule(ctx, *args))
+  return jax.tree.leaves(_prim.block_eval_rule(ctx, *args))
 
 
 @functools.partial(api_boundary, repro_api_name="fuser.push_block_spec")
@@ -2327,9 +2327,9 @@ def _custom_vjp_call_push_rule(
 
 @register_push_block_spec_rule(hijax.call_hi_primitive_p)
 def _custom_call_hi_primitive_push_block_spec_rule(
-    ctx: PullRuleContext, *block_specs, prim
+    ctx: PullRuleContext, *block_specs, _prim
 ):
-  return prim.push_block_spec_rule(ctx, block_specs)
+  return _prim.push_block_spec_rule(ctx, block_specs)
 
 
 @register_push_block_spec_rule(pjit.jit_p)
