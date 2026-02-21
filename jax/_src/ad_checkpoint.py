@@ -33,10 +33,13 @@ from jax._src import effects
 from jax._src import source_info_util
 from jax._src import traceback_util
 from jax._src import api_util
+from jax._src import custom_derivatives
 from jax._src.interpreters import ad
 from jax._src.interpreters import batching
 from jax._src.interpreters import mlir
 from jax._src.interpreters import partial_eval as pe
+from jax._src.interpreters.remat import remat_transform
+from jax._src.hijax import VJPHiPrimitive
 from jax._src.lax import lax as lax_internal
 from jax._src.lax import convolution as lax_convolution
 from jax._src.lib.mlir.dialects import hlo
@@ -505,7 +508,7 @@ def saved_residuals(f: Callable,
     return f(*args, **kwargs)
 
   debug_info = api_util.debug_info("saved_residuals", f, args, kwargs)
-  out = api.make_jaxpr(lambda *args: api.linearize(f_, *args),
+  out = api.make_jaxpr(lambda *args: api.vjp(f_, *args),
                        return_shape=True)(*in_leaves)
   assert isinstance(out, tuple)
   jaxpr_, out_shape_ = out
@@ -985,3 +988,79 @@ def _remat_state_discharge_rule(
                 for a in in_avals]
   assert next(ref_vals_, None) is None
   return new_invals, out_vals
+
+
+# -------------------- Remat 3 --------------------
+
+# TODO
+#  [ ] zeros propagation (needs separate ruleset, maybe jax.vjp improvement)
+#  [ ] accum-native vjp_bwd via with_accums
+
+def checkpoint_name3(name, x):
+  return CheckpointName(name, core.typeof(x))(x)
+
+def remat3(f=None, /, policy=frozenset()):
+  return partial(partial, _remat3, policy) if f is None else partial(_remat3, policy, f)
+
+def _remat3(policy, f, *args):
+  return RematTraced(api.jit(f).trace(*args), policy)(*args)
+
+class RematTraced(VJPHiPrimitive):
+  traced: Any
+  policy: Any
+
+  def __init__(self, traced, policy):
+    self.in_avals, () = traced.in_avals
+    self.out_aval = traced.out_avals
+    self.params = dict(traced=traced, policy=policy)
+    super().__init__()
+
+  def expand(self, *args):
+    return self.traced(*args)  # type: ignore
+
+  def vjp_fwd(self, _nzs_in, *primals):
+    primals_out, fwd2 = remat_transform(self.policy, self.traced, *primals)
+    return primals_out, (primals, fwd2)
+
+  def vjp_bwd(self, res, outgrad, *arg_accums):
+    primals, fwd2 = res
+    _, bwd = api.vjp(fwd2, *api.lax.optimization_barrier(primals))
+    arg_grads = bwd(outgrad)
+    for x, ct in zip(arg_accums, arg_grads):
+      x.accum(ct)
+
+  def jvp(self, primals, tangents):
+    return api.jvp(self.traced, primals, tangents)
+
+  def lin(self, nzs_in, *primals):
+    primals_out, f_lin = api.linearize(self.traced, *primals)
+    return primals_out, primals
+
+  def linearized(self, primals, *tangents):
+    _, f_lin = api.linearize(self.traced, *primals)
+    return f_lin(*tangents)
+
+class CheckpointName(VJPHiPrimitive):
+  def __init__(self, name, aval):
+    self.in_avals = aval,
+    self.out_aval = aval
+    self.params = dict(name=name)
+    super().__init__()
+
+  def expand(self, x):
+    return x
+
+  def remat(self, policy, x):
+    saveable = self.name in policy
+    rem = partial(primal_left_tangent_right, x) if saveable else lambda x: x
+    return x, rem
+
+  # TODO all other rules too
+
+@custom_derivatives.custom_jvp
+def primal_left_tangent_right(x, _x):
+  return x
+@primal_left_tangent_right.defjvp
+def _jvp(primals, tangents):
+  (x, _), (_, t) = primals, tangents
+  return x, t

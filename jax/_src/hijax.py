@@ -30,6 +30,7 @@ from jax._src.core import typeof
 from jax._src.interpreters import ad
 from jax._src.interpreters import batching
 from jax._src.interpreters import partial_eval as pe
+from jax._src.interpreters import remat
 from jax._src.custom_derivatives import CustomVJPPrimal, _temporary_dtype_exception
 from jax._src.errors import UnexpectedTracerError
 from jax._src.state.types import AbstractRef
@@ -418,13 +419,17 @@ class VJPHiPrimitive:
     raise NotImplementedError(f"for vmap support, subclass {type(self)} must "
                               "implement `batch` or `batch_dim_rule`")
 
-  # dce interface
+  # optional dce control
   def dce(self, used_outs):
     used_outs_flat = tree_leaves_checked(self.out_tree, used_outs)
     if not any(used_outs_flat):
       return False, False, None
     else:
       return True, True, self
+
+  # optional remat control
+  def remat(self, _policy, *args):
+    return self(*args), self  # full remat by default
 
   def __call__(self, *args):
     args_flat = tree_leaves_checked(self.in_tree, args)
@@ -621,6 +626,16 @@ pe.dce_rules[call_hi_primitive_p] = _call_hi_primitive_dce
 
 call_hi_primitive_linearized_p.to_lojax = ad.raise_custom_vjp_error_on_jvp
 batching.fancy_primitive_batchers[call_hi_primitive_linearized_p] = ad.raise_custom_vjp_error_on_jvp
+
+def _call_hi_primitive_remat(policy, *args_flat, _prim):
+  args = tree_unflatten(_prim.in_tree, args_flat)
+  out, rem_ = _prim.remat(policy, *args)
+  def rem(*args_flat):
+    args = tree_unflatten(_prim.in_tree, args_flat)
+    out = rem_(*args)
+    return tree_leaves_checked(_prim.out_tree, out)
+  return tree_leaves_checked(_prim.out_tree, out), rem
+remat.rules[call_hi_primitive_p] = _call_hi_primitive_remat
 
 
 class CustomVJPTraced(VJPHiPrimitive):

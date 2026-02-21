@@ -57,7 +57,7 @@ from jax._src import test_util as jtu
 from jax._src import xla_bridge
 from jax._src import debugging
 from jax._src import sharding_impls
-from jax._src.ad_checkpoint import saved_residuals
+from jax._src.ad_checkpoint import saved_residuals, remat3, checkpoint_name3
 from jax._src.interpreters import ad as ad_internal
 from jax._src.interpreters import mlir
 from jax._src.interpreters import partial_eval as pe
@@ -7161,6 +7161,21 @@ class RematTest(jtu.JaxTestCase):
     x = jnp.ones(3)
     txt = jax.jit(jax.grad(loss, (0, 1))).lower(Ws, x).as_text()
     self.assertRegex(txt, r'optimization_barrier %[a-z0-9]+, %[a-z0-9]+ :')
+
+
+class Remat3Test(jtu.JaxTestCase):
+
+  def test_basic(self):
+    def f(x):
+      return jax.lax.sin(checkpoint_name3('foo', jax.lax.sin(x)))
+
+    f1 = remat3(f, {'foo'})
+    res = saved_residuals(f1, jnp.arange(3.))
+    self.assertLen(res, 2)  # middle sin is saveable
+
+    f1 = remat3(f, set())
+    res = saved_residuals(f1, jnp.arange(3.))
+    self.assertLen(res, 1)  # just the input is saveable
 
 
 @jtu.with_config(jax_pprint_use_color=False)
