@@ -1205,7 +1205,8 @@ def _gather(arr, dynamic_idx, *, treedef, indices_are_sorted,
   # Avoid calling gather if the slice shape is empty, both as a fast path and to
   # handle cases like zeros(0)[array([], int32)].
   if core.is_empty_shape(indexer.slice_shape):
-    return lax.full_like(y, 0, shape=indexer.slice_shape)
+    return lax.full_like(y, 0, shape=indexer.slice_shape,
+                         sharding=indexer.slice_sharding)
 
   # We avoid generating a gather when indexer.gather_indices.size is empty.
   if not core.is_empty_shape(indexer.gather_indices.shape):

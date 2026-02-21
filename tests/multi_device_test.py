@@ -335,13 +335,13 @@ class MultiDeviceTest(jtu.JaxTestCase):
     x = jax.device_put(jnp.ones((100, 100)), devices[1])
     y = lax.full_like(x, fill_value=1.0, shape=())
     self.assertEqual(y.shape, ())
-    # Currently if shape is provided the sharding will revert
-    # to default. This might change in the future and this test might
-    # need to be updated.
-    self.assertEqual(
-        y.sharding,
-        jax.sharding.SingleDeviceSharding(jax.devices()[0]))
+    self.assertEqual(y.sharding, jax.sharding.SingleDeviceSharding(devices[1]))
 
+  def test_full_like_replicated_sharding_different_shape(self):
+    devices = self.get_devices()
+    x = jax.numpy.arange(10, device=devices[1])
+    y = jax.lax.full_like(x, 1, shape=(5,))
+    self.assertEqual(x.sharding, y.sharding)
 
   def test_lax_full_like_efficient(self):
     devices = self.get_devices()
