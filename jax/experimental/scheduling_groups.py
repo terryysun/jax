@@ -113,7 +113,8 @@ def _xla_metadata_call_jvp(primals, tangents, *, jaxpr, **meta):
 ad.primitive_jvps[xla_metadata_call_p] = _xla_metadata_call_jvp
 
 
-def _xla_metadata_call_lin(nzs, *primals, jaxpr, **meta):
+def _xla_metadata_call_lin(_is_vjp, nzs, *primals, jaxpr, **meta):
+  # TODO(mattjj,yashkatariya): should use ad.linearize_jaxpr here
   jaxpr_jvp, out_nzs = ad.jvp_jaxpr(jaxpr, nzs, False)
   lin_outs = [False] * len(out_nzs) + [True] * sum(out_nzs)
   jaxpr_lin_, used_inputs = pe.dce_jaxpr(jaxpr_jvp.jaxpr, lin_outs, False)

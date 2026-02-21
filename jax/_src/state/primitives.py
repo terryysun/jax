@@ -1071,7 +1071,7 @@ def _ref_jvp(primals, tangents, *, memory_space, kind):
     tangent_out = core.ref_p.bind(init_dot, memory_space=memory_space, kind=kind)
   return primal_out, tangent_out
 
-def _ref_lin(nzs, x, *, memory_space, kind):
+def _ref_lin(_is_vjp, nzs, x, *, memory_space, kind):
   nz, = nzs
   x_ref = core.ref_p.bind(x, memory_space=memory_space, kind=kind)
   def mut_lin(_, x_dot):
@@ -1096,7 +1096,7 @@ def _empty_ref_jvp(primals, tangents, *, ty, memory_space):
   return primal_ref, tangent_ref
 ad.primitive_jvps[core.empty_ref_p] = _empty_ref_jvp
 
-def _empty_ref_lin(nzs_in, *, ty, memory_space):
+def _empty_ref_lin(_is_vjp, nzs_in, *, ty, memory_space):
   primal_ref = core.empty_ref_p.bind(ty=ty, memory_space=memory_space)
   def lin(_):
     return core.empty_ref_p.bind(ty=ty.to_tangent_aval(),

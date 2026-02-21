@@ -513,16 +513,16 @@ def _cond_batching_rule(axis_data, args, dims, *, branches, **params):
                       **params)
     return out, out_dims
 
-def _cond_linearize(nzs, *primals_in, branches, **params):
+def _cond_linearize(is_vjp, nzs, *primals_in, branches, **params):
   idx_nz, *nzs = nzs
   assert not idx_nz
-  nzs_out = [ad.linearize_jaxpr(jaxpr, nzs, allow_fwds=False)[2]
+  nzs_out = [ad.linearize_jaxpr(jaxpr, nzs, allow_fwds=False, is_vjp=is_vjp)[2]
              for jaxpr in branches]
   nzs_out = map(any, zip(*nzs_out))
   primal_jaxprs, tangent_jaxprs, branch_res_avals = [], [], []
   for jaxpr in branches:
     primal_jaxpr, num_res_out, _, _, tangent_jaxpr = \
-        ad.linearize_jaxpr(jaxpr, nzs, instantiate=nzs_out, allow_fwds=False)  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
+        ad.linearize_jaxpr(jaxpr, nzs, instantiate=nzs_out, allow_fwds=False, is_vjp=is_vjp)  # pyrefly: ignore[bad-argument-type]  # pyrefly#2385
     res_avals = primal_jaxpr.out_avals[len(primal_jaxpr.out_avals)-num_res_out:]
     primal_jaxprs.append(primal_jaxpr)
     tangent_jaxprs.append(tangent_jaxpr)

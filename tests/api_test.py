@@ -5200,7 +5200,7 @@ class APITest(jtu.JaxTestCase):
     check_invariant_to_use_direct_linearize(lambda: jax.grad(sin_of_sin)(1.0))
 
   def test_deferred_primal_with_direct_linearize(self):
-    def my_sin_lin(nzs, x):
+    def my_sin_lin(_is_vjp, nzs, x):
       nz, = nzs
       return (my_sin_p.bind(x, accuracy=None), nz, x, lambda x, t: lax.mul(t, lax.cos(x)))
 

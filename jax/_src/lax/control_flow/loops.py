@@ -665,7 +665,7 @@ def _scan_jvp(primals, tangents, reverse, length, jaxpr, num_consts, num_carry,
                   for p, nz in zip(primals_out, nonzeros_out)]
   return primals_out, tangents_out
 
-def _scan_linearize(nzs, *primals_in, reverse: bool, length: int, num_consts:
+def _scan_linearize(is_vjp, nzs, *primals_in, reverse: bool, length: int, num_consts:
                     int, num_carry: int, jaxpr: ClosedJaxpr, linear:
                     Sequence[bool], unroll: int, _split_transpose: bool):
   const_nz, init_nz, xs_nz = split_list(nzs, [num_consts, num_carry])
@@ -680,7 +680,7 @@ def _scan_linearize(nzs, *primals_in, reverse: bool, length: int, num_consts:
     nzs = const_nz + carry_nz + xs_nz
     primal_jaxpr, num_res_out, nzs_out, in_fwd_res, tangent_jaxpr = \
         ad.linearize_jaxpr(jaxpr, nzs, allow_fwds=allow_fwds,
-                           instantiate=carry_nz + [False] * num_ys)
+                           instantiate=carry_nz + [False] * num_ys, is_vjp=is_vjp)
     carry_nz_out = nzs_out[:num_carry]
     if carry_nz_out == carry_nz:
       break
