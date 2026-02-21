@@ -1460,7 +1460,8 @@ def _index_to_gather(indexer: NDIndexer, *, x_sharding: NamedSharding | Any,
     collapsed_slice_dims = tuple(sorted(collapsed_slice_dims)),
     start_index_map = tuple(start_index_map)
   )
-  slice_sharding = x_sharding.update(spec=slice_spec)
+  slice_sharding = canonicalize_sharding(x_sharding.update(spec=slice_spec),
+                                         "index_to_gather")
   return _GatherIndexer(
     slice_shape=slice_shape,
     newaxis_dims=tuple(newaxis_dims),

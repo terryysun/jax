@@ -343,6 +343,12 @@ class MultiDeviceTest(jtu.JaxTestCase):
     y = jax.lax.full_like(x, 1, shape=(5,))
     self.assertEqual(x.sharding, y.sharding)
 
+  def test_indexing_empty_shape_preserves_sharding(self):
+    dev = self.get_devices()[1]
+    cpu_array = jnp.asarray([1], device=dev)
+    masked = cpu_array[jnp.asarray([False], device=dev)]
+    self.assertEqual(masked.device, dev)
+
   def test_lax_full_like_efficient(self):
     devices = self.get_devices()
     if len(devices) < 4:
