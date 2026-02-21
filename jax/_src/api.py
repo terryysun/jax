@@ -2207,13 +2207,13 @@ def _vjp(fun, *primals, has_aux=False):
   if not has_aux:
     flat_fun, out_tree = flatten_fun_nokwargs(fun, in_tree)
     out_primals_flat, out_pvals, jaxpr, residuals = ad.linearize(
-        flat_fun, *primals_flat)
+        flat_fun, *primals_flat, is_vjp=True)
     out_tree = out_tree()
     aux = aux_tree = None
   else:
     flat_fun, out_aux_trees = flatten_fun_nokwargs2(fun, in_tree)
     out_primals_flat, out_pvals, jaxpr, residuals, aux = ad.linearize(
-        flat_fun, *primals_flat, has_aux=True)
+        flat_fun, *primals_flat, has_aux=True, is_vjp=True)
     out_tree, aux_tree = out_aux_trees()
     del out_aux_trees
   out_known = [pval.is_known() for pval in out_pvals]

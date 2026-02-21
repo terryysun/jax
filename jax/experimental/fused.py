@@ -102,7 +102,8 @@ def _fused_jvp(primals, tangents, *, jaxpr, out_spaces):
   return primals_out, tangents_out
 ad.primitive_jvps[fused_p] = _fused_jvp
 
-def _fused_lin(nzs, *primals, jaxpr, out_spaces):
+def _fused_lin(_is_vjp, nzs, *primals, jaxpr, out_spaces):
+  # TODO(mattjj): why did i do jvp + dce here, not ad.linearize_jaxpr?
   jaxpr_jvp, out_nzs = ad.jvp_jaxpr(jaxpr, nzs, False)
   lin_outs = [False] * len(out_nzs) + [True] * sum(out_nzs)
   jaxpr_lin_, used_inputs = pe.dce_jaxpr(jaxpr_jvp.jaxpr, lin_outs, False)

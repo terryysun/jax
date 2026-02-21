@@ -2892,8 +2892,8 @@ class CustomVJPTest(jtu.JaxTestCase):
     f.defvjp(f_fwd, f_bwd, symbolic_zeros=True)
 
     f_ = core.jaxpr_as_fun(jax.make_jaxpr(f)(2., 3.))
-    _ = jax.linearize(f_, 2., 3.)
-    _ = jax.linearize(lambda x: f_(x, 3.), 2.)  # don't crash!
+    _ = jax.vjp(f_, 2., 3.)
+    _ = jax.vjp(lambda x: f_(x, 3.), 2.)  # don't crash!
 
   def test_run_rules_more_than_once(self):
     # https://github.com/jax-ml/jax/issues/16614

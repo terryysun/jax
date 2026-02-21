@@ -84,15 +84,14 @@ def jvpfun(f: Callable, instantiate, transform_stack, primals, tangents):
   return out_primals, out_tangents
 
 @lu.transformation_with_aux2
-def linearize_subtrace(_f: Callable, _store: lu.Store, _tag: core.TraceTag,
-                       nzs_in: Sequence[bool],
-                       debug_info: core.DebugInfo,
-                       *primals, **params):
+def linearize_subtrace(_f: Callable, _store: lu.Store, _is_vjp: bool,
+                       _tag: core.TraceTag, nzs_in: Sequence[bool],
+                       debug_info: core.DebugInfo, *primals, **params):
   source_info = source_info_util.current()
   with core.take_current_trace() as parent_trace:
     tangent_trace = pe.DynamicJaxprTrace(debug_info, auto_dce=True)
     tangent_trace.tag = _tag
-    linearize_trace = LinearizeTrace(parent_trace, tangent_trace, tag=_tag)
+    linearize_trace = LinearizeTrace(parent_trace, tangent_trace, _is_vjp, _tag)
     tracers = [LinearizeTracer(linearize_trace, p,
                                tangent_trace.new_arg(get_aval(p).to_tangent_aval(),
                                                      source_info))
@@ -150,6 +149,8 @@ def linearize_jaxpr(
     nonzeros: Sequence[bool],
     instantiate: bool | Sequence[bool] = False,
     allow_fwds: bool | Sequence[bool] = True,
+    *,
+    is_vjp: bool,
 ) -> tuple[core.ClosedJaxpr, int, Sequence[bool], Sequence[int | None], core.ClosedJaxpr]:
   if type(allow_fwds) is bool:
     allow_fwds = (allow_fwds,) * (len(jaxpr.consts) + len(jaxpr.jaxpr.invars))
@@ -158,7 +159,7 @@ def linearize_jaxpr(
     instantiate = (instantiate,) * len(jaxpr.jaxpr.outvars)
   assert len(instantiate) == len(jaxpr.jaxpr.outvars)
   return _linearize_jaxpr(jaxpr, tuple(nonzeros), tuple(instantiate),
-                          tuple(allow_fwds))
+                          tuple(allow_fwds), is_vjp)
 
 @weakref_lru_cache
 @source_info_util.reset_name_stack()
@@ -167,13 +168,15 @@ def _linearize_jaxpr(
     nonzeros: tuple[bool, ...],
     instantiate: tuple[bool, ...],
     allow_fwds: tuple[bool, ...],
+    is_vjp: bool,
 ) -> tuple[core.ClosedJaxpr, int, Sequence[bool], Sequence[int | None], core.ClosedJaxpr]:
   dbg = jaxpr.jaxpr.debug_info
   config.enable_checks.value and dbg.assert_arg_names(len(nonzeros))
   primal_trace = pe.DynamicJaxprTrace(dbg)
   tangent_trace = pe.DynamicJaxprTrace(dbg, auto_dce=True)
-  lin_trace = LinearizeTrace(primal_trace, tangent_trace)
-  tangent_trace.tag = lin_trace.tag
+  tag = core.TraceTag()
+  lin_trace = LinearizeTrace(primal_trace, tangent_trace, is_vjp=is_vjp, tag=tag)
+  tangent_trace.tag = tag
 
   def new_arg(trace, primal_aval, nz, source_info):
     primal = primal_trace.new_arg(primal_aval, source_info)
@@ -229,33 +232,31 @@ def _dce_consts(jaxpr, consts):
       [False] * len(jaxpr.constvars) + [True] * len(jaxpr.invars))
   return jaxpr, [c for c, used in zip(consts, used_consts) if used]
 
-def direct_linearize(traceable: lu.WrappedFun, primals, kwargs, *,
-                     has_aux=False, tag=None):
+def direct_linearize(traceable, primals, *, has_aux, is_vjp):
   dbg = traceable.debug_info.with_unknown_names()
+  tag = core.TraceTag()
   with core.take_current_trace() as parent_trace:
     source_info = source_info_util.current()
     tangent_trace = pe.DynamicJaxprTrace(dbg, auto_dce=True)
+    tangent_trace.tag = tag
     tangents = [tangent_trace.new_arg(get_aval(p).to_tangent_aval(), source_info) for p in primals]
     tangents = [p2tz(t) if not isinstance(t, Zero)
                 and isinstance(typeof(t), core.ShapedArray)
                 and dtype(t) == float0 else t for t in tangents]
-    linearize_trace = LinearizeTrace(parent_trace, tangent_trace, tag=tag)
-    tangent_trace.tag = linearize_trace.tag
-    tracers = [LinearizeTracer(linearize_trace, p, t) for p, t in zip(primals, tangents)]
+    lin_trace = LinearizeTrace(parent_trace, tangent_trace, is_vjp, tag)
+    tracers = [LinearizeTracer(lin_trace, p, t) for p, t in zip(primals, tangents)]
     tracers = [t.full_lower() for t in tracers]
-    with (core.set_current_trace(linearize_trace),
+    with (core.set_current_trace(lin_trace),
           source_info_util.transform_name_stack('jvp')):
       if has_aux:
         ans, aux = traceable.call_wrapped(*tracers)
-        aux_primals = [x.primal
-                       if isinstance(x, LinearizeTracer)
-                       and x._trace.tag is linearize_trace.tag
-                       else x for x in aux]
+        aux = [x.primal if type(x) is LinearizeTracer and x._trace.tag is tag
+               else x for x in aux]
       else:
         ans = traceable.call_wrapped(*tracers)
         aux = None
-      out_primals, out_tangents = unzip2(map(linearize_trace.to_primal_tangent_pair, ans))
-      del linearize_trace, ans, tracers
+      out_primals, out_tangents = unzip2(map(lin_trace.to_primal_tangent_pair, ans))
+      del lin_trace, ans, tracers
   out_nzs = [type(t) is not Zero for t in out_tangents]
   out_nz_tangents = [t for t, nz in zip(out_tangents, out_nzs) if nz]
   out_nz_tangents = map(partial(tangent_trace.to_jaxpr_tracer,
@@ -271,14 +272,13 @@ def direct_linearize(traceable: lu.WrappedFun, primals, kwargs, *,
                         pe.PartialVal.known(zeros_like_aval(t.aval))
                         for t, nz in zip(out_tangents, out_nzs)]
   if has_aux:
-    return out_primals, out_tangents_pvals, jaxpr, consts, aux_primals
+    return out_primals, out_tangents_pvals, jaxpr, consts, aux
   else:
     return out_primals, out_tangents_pvals, jaxpr, consts
 
-def linearize(traceable: lu.WrappedFun, *primals, **kwargs):
-  has_aux = kwargs.pop('has_aux', False)
+def linearize(traceable: lu.WrappedFun, *primals, has_aux=False, is_vjp=False):
   if config.use_direct_linearize.value:
-    return direct_linearize(traceable, primals, kwargs, has_aux=has_aux)
+    return direct_linearize(traceable, primals, has_aux=has_aux, is_vjp=is_vjp)
   if not has_aux:
     jvpfun = jvp(traceable)
   else:
@@ -758,13 +758,14 @@ call_transpose_param_updaters: dict[core.Primitive, Callable] = {}
 
 class LinearizeTrace(Trace):
 
-  def __init__(self, parent_trace, tangent_trace, tag=None):
+  def __init__(self, parent_trace, tangent_trace, is_vjp, tag):
     super().__init__()
-    self.tag = core.TraceTag() if tag is None else tag
     self.parent_trace = parent_trace
     self.tangent_trace = tangent_trace
-    self._name_stack_prefix_len = len(source_info_util.current_name_stack())
+    self.is_vjp = is_vjp
+    self.tag = tag
     self.requires_low = False
+    self._name_stack_prefix_len = len(source_info_util.current_name_stack())
 
   def _name_stack_suffix(self):
     return source_info_util.current_name_stack()[self._name_stack_prefix_len:]
@@ -787,7 +788,7 @@ class LinearizeTrace(Trace):
     lin = primitive_linearizations.get(primitive, fallback)
     with core.set_current_trace(self.parent_trace):
       primal_out, tangent_nzs_out, residuals, linearized = lin(
-          tangent_nzs, *primals_in, **params)
+          self.is_vjp, tangent_nzs, *primals_in, **params)
     with (core.set_current_trace(self.tangent_trace),
           source_info_util.set_name_stack(self._name_stack_suffix())):
       tangent_out = linearized(residuals, *tangents_in)
@@ -865,7 +866,7 @@ class LinearizeTrace(Trace):
     primals, tangents = unzip2(map(self.to_primal_tangent_pair, tracers))
     nzs_in = tuple(type(t) is not Zero for t in tangents)
     f_primal, linearize_outs_thunk = linearize_subtrace(
-        f, self.tag, nzs_in, f.debug_info)
+        f, self.is_vjp, self.tag, nzs_in, f.debug_info)
     if isinstance(call_primitive, core.MapPrimitive):
       out_axes_thunk = params['out_axes_thunk']
       @as_hashable_function(closure=out_axes_thunk)
@@ -956,7 +957,7 @@ def maybe_linearize_tracer(trace, primal, is_nonzero, tangent):
     return primal
 
 def fallback_linearize_rule(_prim: core.Primitive,
-                            _nonzeros: Sequence[bool], *primals, **params):
+                            _is_vjp, _nonzeros: Sequence[bool], *primals, **params):
   jvp = primitive_jvps.get(_prim)
   if not jvp:
     msg = f"Differentiation rule for '{_prim}' not implemented"

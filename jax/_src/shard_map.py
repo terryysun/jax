@@ -1610,7 +1610,7 @@ def _shard_map_linearize(trace, shard_map_p, f: lu.WrappedFun,
   nzs_in = tuple(type(t) is not ad.Zero for t in tangents)
   f = f.with_unknown_names()
   f_primal, linearize_outs_thunk = ad.linearize_subtrace(
-      f, trace.tag, nzs_in, f.debug_info)
+      f, trace.is_vjp, trace.tag, nzs_in, f.debug_info)
   f_primal = _promote_scalar_residuals_lin(f_primal, linearize_outs_thunk)
   all_names = _all_newly_manual_mesh_names(mesh, manual_axes)
 

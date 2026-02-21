@@ -382,6 +382,7 @@ class VJPHiPrimitive:
   def expand(self, *args):
     raise NotImplementedError(f"subclass {type(self)} must implement `expand`")
 
+  # reverse-mode AD interface
   def vjp_fwd(self, nzs_in, *args):
     raise NotImplementedError(f"for grad support, subclass {type(self)} must "
                               "implement `vjp_fwd`")
@@ -395,6 +396,20 @@ class VJPHiPrimitive:
     raise NotImplementedError(f"for grad support, subclass {type(self)} must "
                               "implement `vjp_bwd` or `vjp_bwd_retval`")
 
+  # optional forward-mode AD interfaces
+  def jvp(self, primals, tangents):
+    raise NotImplementedError(f"for jvp support, subclass {type(self)} must "
+                              "implement `jvp`")
+
+  def lin(self, nzs_in, *primals):
+    raise NotImplementedError(f"for linearize support, subclass {type(self)} "
+                              "must implement `lin` and `linearized`")
+
+  def linearized(self, residuals, *tangents):
+    raise NotImplementedError(f"for linearize support, subclass {type(self)} "
+                              "must implement `lin` and `linearized`")
+
+  # vmap interface
   def batch(self, axis_data, args, dims):
     out_dim = self.batch_dim_rule(axis_data, dims)
     return VmapOf(self, axis_data, dims, out_dim)(*args), out_dim
@@ -402,10 +417,6 @@ class VJPHiPrimitive:
   def batch_dim_rule(self, axis_data, dims):
     raise NotImplementedError(f"for vmap support, subclass {type(self)} must "
                               "implement `batch` or `batch_dim_rule`")
-
-  def jvp(self, primals, tangents):
-    raise NotImplementedError(f"for jvp support, subclass {type(self)} must "
-                              "implement `jvp`")
 
   def __call__(self, *args):
     args_flat = tree_leaves_checked(self.in_tree, args)
@@ -527,15 +538,20 @@ def _call_hi_primitive_batcher(axis_data, args_flat, dims_flat, _prim):
   return ans_flat, dims_flat
 batching.fancy_primitive_batchers[call_hi_primitive_p] = _call_hi_primitive_batcher
 
-def _call_hi_primitive_linearize(nz_in_flat, *args_flat, _prim):
+def _call_hi_primitive_linearize(is_vjp, nz_in_flat, *args_flat, _prim):
   args = tree_unflatten(_prim.in_tree, args_flat)
   nzs_in = tree_unflatten(_prim.in_tree, nz_in_flat)
-  ans, residuals, *maybe_nzs_out = _prim.vjp_fwd(nzs_in, *args)
+  if is_vjp:
+    ans, residuals, *maybe_nzs_out = _prim.vjp_fwd(nzs_in, *args)
+    linearized = partial(fake_linear_op, _prim, nz_in_flat)
+  else:
+    ans, residuals, *maybe_nzs_out = _prim.lin(nzs_in, *args)
+    linearized = partial(flatten_user_linearized, _prim)
   ans_flat = tree_leaves_checked(_prim.out_tree, ans)
-  nzs_out = True if maybe_nzs_out == [] else maybe_nzs_out[0]
+  nzs_out = maybe_nzs_out[0] if maybe_nzs_out else True
   nzs_out_flat = broadcast_prefix(nzs_out, ans)
-  linearized = partial(fake_linear_op, _prim, nz_in_flat)
-  return (ans_flat, nzs_out_flat, residuals, linearized)
+  return ans_flat, nzs_out_flat, residuals, linearized
+ad.primitive_linearizations[call_hi_primitive_p] = _call_hi_primitive_linearize
 
 def fake_linear_op(prim, nz_in_flat, rs, *tangents):
   residuals_flat, residuals_tree = tree_flatten(rs)
@@ -545,7 +561,11 @@ def fake_linear_op(prim, nz_in_flat, rs, *tangents):
       *residuals_flat, *nz_tangents, residuals_tree=residuals_tree, _prim=prim,
       nz_in_flat=tuple(nz_in_flat))
 
-ad.primitive_linearizations[call_hi_primitive_p] = _call_hi_primitive_linearize
+def flatten_user_linearized(prim, residuals, *tangents_flat):
+  tangents = tree_unflatten(prim.in_tree, tangents_flat)
+  tangents_out = prim.linearized(residuals, *tangents)
+  tangents_out_flat = tree_leaves_checked(prim.out_tree, tangents_out)
+  return tangents_out_flat
 
 call_hi_primitive_linearized_p = core.Primitive("call_hi_primitive_linearized")
 call_hi_primitive_linearized_p.multiple_results = True

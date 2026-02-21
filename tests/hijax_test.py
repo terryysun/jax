@@ -1111,6 +1111,39 @@ class HijaxTest(jtu.JaxTestCase):
         actual_grad = jax.jit(jax.grad(jax.remat(square)))(x)
       self.assertArraysAllClose(actual_grad, expected_grad)
 
+  @parameterized.parameters([False, True])
+  def test_linearize_rule(self, jit):
+    class RaiseToStaticPower(VJPHiPrimitive):
+      def __init__(self, in_aval, *, power):
+        self.in_avals = (in_aval,)
+        self.out_aval = in_aval
+        self.params = dict(power=power)
+        super().__init__()
+
+      def expand(self, x):
+        return x ** self.power
+
+      def lin(self, nzs_in, x):
+        nz, = nzs_in
+        assert nz
+        return self(x), x
+
+      def linearized(self, x, t):
+        return t * self.power * raise_to_static_power(x, self.power-1)
+
+    def raise_to_static_power(x, power):
+      x_aval = jax.typeof(x)
+      return RaiseToStaticPower(x_aval, power=power)(x)
+
+    def f(x):
+      return raise_to_static_power(x, 3)
+
+    if jit:
+      f = jax.jit(f)
+
+    self.assertEqual(f(2.0), 8.0)
+    self.assertEqual(jax.linearize(f, 2.0)[1](1.0), 12.0)
+
 
 class BoxTest(jtu.JaxTestCase):
 

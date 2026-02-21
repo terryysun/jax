@@ -4278,7 +4278,7 @@ def _sin_lowering(ctx, x, accuracy):
   return _nary_lower_hlo(hlo.sine, ctx, x, accuracy=accuracy)
 
 
-def _sin_lin(nzs, x, accuracy):
+def _sin_lin(_is_vjp, nzs, x, accuracy):
   nz, = nzs
   return (sin_p.bind(x, accuracy=accuracy), nz, cos(x),
           lambda cos_x, t: mul(t, cos_x))
@@ -7889,7 +7889,7 @@ def _reduce_logical_shape_rule(operand, *, axes):
 def _reduce_logical_sharding_rule(operand, *, axes):
   return operand.sharding.update(spec=tuple_delete(operand.sharding.spec, axes))
 
-def _reduce_or_lin(nzs, x, *, axes):
+def _reduce_or_lin(_is_vjp, nzs, x, *, axes):
   nz, = nzs
   y = reduce_or_p.bind(x, axes=axes)
   aval = typeof(y).to_tangent_aval()
