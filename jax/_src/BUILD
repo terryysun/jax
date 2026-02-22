@@ -252,6 +252,7 @@ pytype_strict_library(
         ":partial_eval",
         ":partition_spec",
         ":profiler",
+        ":remat",
         ":sharding",
         ":sharding_impls",
         ":sharding_specs",

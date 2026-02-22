@@ -7165,9 +7165,13 @@ class RematTest(jtu.JaxTestCase):
 
 class Remat3Test(jtu.JaxTestCase):
 
-  def test_basic(self):
+  @parameterized.parameters([False, True])
+  def test_basic(self, jit):
     def f(x):
       return jax.lax.sin(checkpoint_name3('foo', jax.lax.sin(x)))
+
+    if jit:
+      f = jax.jit(f)
 
     f1 = remat3(f, {'foo'})
     res = saved_residuals(f1, jnp.arange(3.))
