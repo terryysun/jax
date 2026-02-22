@@ -54,6 +54,7 @@ from jax._src.interpreters import ad
 from jax._src.interpreters import batching
 from jax._src.interpreters import mlir
 from jax._src.interpreters import pxla
+from jax._src.interpreters import remat
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import func as func_dialect
 from jax._src.lib import xla_client as xc
@@ -1668,6 +1669,31 @@ def _pjit_linearize(is_vjp, nzs, *primals_in, jaxpr, in_shardings, out_shardings
 
   return primal_ans, nzs_out, residuals_ans, tangent_fun
 ad.primitive_linearizations[jit_p] = _pjit_linearize
+
+
+def _pjit_remat(policy, *args, jaxpr, **params):
+  jaxpr_fwd, jaxpr_rem, num_res = remat.remat_jaxpr(jaxpr, policy)
+  params_fwd, params_rem = _add_res_to_params(num_res, **params)
+  primals_res_out = jit_p.bind(*args, jaxpr=jaxpr_fwd, **params_fwd)
+  primals_out, res = split_list(primals_res_out, [len(jaxpr.outvars)])
+  return primals_out, partial(jit_p.bind, *res, jaxpr=jaxpr_rem, **params_rem)
+remat.rules[jit_p] = _pjit_remat
+
+def _add_res_to_params(num_res, in_shardings, out_shardings, in_layouts,
+                       out_layouts, donated_invars, **params):
+  params_fwd = dict(params,
+                    in_shardings=in_shardings,
+                    out_shardings=out_shardings + (UNSPECIFIED,) * num_res,
+                    in_layouts=in_layouts,
+                    out_layouts=out_layouts + (None,) * num_res,
+                    donated_invars=donated_invars)
+  params_rem = dict(params,
+                    in_shardings=(UNSPECIFIED,) * num_res + in_shardings,
+                    out_shardings=out_shardings,
+                    in_layouts=(None,) * num_res + in_layouts,
+                    out_layouts=out_layouts,
+                    donated_invars=(False,) * num_res + donated_invars)
+  return params_fwd, params_rem
 
 
 def _pjit_partial_eval(trace: pe.JaxprTrace,
