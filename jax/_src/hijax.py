@@ -800,12 +800,13 @@ class OptRemat(VJPHiPrimitive):
     return self.traced_fwd(*primals)
 
   def dce(self, used_outs):
-    _, used_res = used_outs
-    if any(used_res):
+    used_primals, used_res = used_outs
+    if any(tree_leaves(used_res)):
       return True, (True, True), self  # if any res used, no dce at all
+    elif any(tree_leaves(used_primals)):
+      return True, (True, False), self.orig  # if only primals used, undo AD
     else:
-      del used_res
-      return True, (True, False), self.orig  # if no res used, undo AD
+      return False, (False, False), None
 
   # TODO(mattjj): jvp and transpose? does anyone rely on them?
 
