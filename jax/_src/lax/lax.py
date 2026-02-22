@@ -54,6 +54,7 @@ from jax._src.interpreters import batching
 from jax._src.interpreters import mlir
 from jax._src.interpreters import partial_eval as pe
 from jax._src.interpreters import pxla
+from jax._src.interpreters import remat
 from jax._src.lax import slicing
 from jax._src.lax import utils as lax_utils
 from jax._src.mesh import get_abstract_mesh, get_concrete_mesh
@@ -9069,3 +9070,13 @@ def _opt_barrier_transpose(cts, *primals):
   cts = [ad.instantiate_zeros(ct) for ct in cts]
   return optimization_barrier(cts)
 ad.primitive_transposes[optimization_barrier_p] = _opt_barrier_transpose
+
+
+
+def _array_reduce_precision_handler(t, x):
+  assert isinstance(t, core.ShapedArray)
+  if dtypes.issubdtype(t.dtype, np.inexact):
+    finfo = dtypes.finfo(t.dtype)
+    return reduce_precision(x, exponent_bits=finfo.nexp, mantissa_bits=finfo.nmant)
+  return x
+remat.reduce_precision_handlers[core.ShapedArray] = _array_reduce_precision_handler

@@ -450,6 +450,7 @@ py_library_providing_imports_info(
         ":dtypes",
         ":effects",
         ":ffi",
+        ":hijax",
         ":literals",
         ":mesh",
         ":mlir",
@@ -457,6 +458,7 @@ py_library_providing_imports_info(
         ":partial_eval",
         ":partition_spec",
         ":pretty_printer",
+        ":remat",
         ":sharding",
         ":sharding_impls",
         ":source_info_util",
@@ -1059,6 +1061,20 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "remat",
+    srcs = ["interpreters/remat.py"],
+    deps = [
+        ":api_util",
+        ":config",
+        ":core",
+        ":partial_eval",
+        ":source_info_util",
+        ":tree_util",
+        ":util",
+    ],
+)
+
+pytype_strict_library(
     name = "partition_spec",
     srcs = ["partition_spec.py"],
     deps = [
@@ -1213,6 +1229,7 @@ pytype_strict_library(
         ":dtypes",
         ":effects",
         ":partial_eval",
+        ":remat",
         ":state_types",
         ":tree_util",
         ":util",
