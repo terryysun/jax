@@ -19,7 +19,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import operator
-from typing import Any, ClassVar, Union
+from typing import cast, Any, ClassVar, Union
 
 from jax._src import core
 from jax._src import pretty_printer as pp
@@ -262,6 +262,12 @@ class NDIndexer(state_types.Transform):
       return slice_shape[:pos] + self.int_indexer_shape + slice_shape[pos:]
 
     return slice_shape
+
+  def get_indexer_shape_static(self) -> tuple[int, ...]:
+    indexer_shape = self.get_indexer_shape()
+    if any(not isinstance(d, int) for d in indexer_shape):
+      raise ValueError("Indexer shape is not static")
+    return cast(tuple[int, ...], indexer_shape)
 
   def transform_type(self, x: core.AbstractValue):
     match x:
