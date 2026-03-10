@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_python//python:defs.bzl", "py_test")
 load(
     "//jaxlib:jax.bzl",
     "jax_generate_backend_suites",
@@ -2342,4 +2343,15 @@ jax_py_test(
         "absl/testing",
         "hypothesis",
     ]),
+)
+
+jax_py_test(
+    name = "hardware_utils_test",
+    srcs = ["hardware_utils_test.py"],
+    deps = [
+        "//jax",
+        "//jax/_src:test_util",
+    ] + py_deps([
+        "absl/testing",
+    ])
 )
