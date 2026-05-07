@@ -2483,7 +2483,7 @@ class FragmentedArray:
       tgt_int_ty = ir.IntegerType.get_signless(tgt_bitwidth)
       even_vector_len = vector_len + (vector_len % 2)
       new_registers = np.empty_like(self.registers)
-      def do_convert(pair_vec):
+      def do_convert(vec, convert_vec_len):
         # Construct the PTX assembly out of ptx_instr.
         # The complication here is that some of the f4x2 instructions take or
         # return .b8 registers which are not supported by the NVPTX LLVM backend,
@@ -2523,22 +2523,33 @@ class FragmentedArray:
           ptx_lines.append("mov.b16 $0, {result, result};")
         ptx_lines.append("}")
         ptx = "\t" + "\n\t".join(ptx_lines)
-        ptx_result = llvm.inline_asm(
-            tgt_ptx_pair_int_ty, get_ptx_operands(pair_vec), ptx, ptx_constraints
-        )
-        ptx_result = process_ptx_result(ptx_result)
-        assert ptx_result.type == tgt_pair_int_ty
-        return utils.bitcast(ptx_result, ir.VectorType.get((2,), tgt_int_ty))
+        results = []
+        assert convert_vec_len % 2 == 0, convert_vec_len
+        for i in range(0, convert_vec_len, 2):
+          pair_vec = utils.vector_slice(vec, slice(i, i + 2))
+          ptx_result = llvm.inline_asm(
+              tgt_ptx_pair_int_ty, get_ptx_operands(pair_vec), ptx, ptx_constraints
+          )
+          ptx_result = process_ptx_result(ptx_result)
+          assert ptx_result.type == tgt_pair_int_ty
+          results.append(utils.bitcast(ptx_result, ir.VectorType.get((2,), tgt_int_ty)))
+        return utils.vector_concat(results)
+      longest_useful_vector = 32 // min(src_bitwidth, tgt_bitwidth)
       for idx, reg in np.ndenumerate(self.registers):
         reg = utils.bitcast(reg, ir.VectorType.get((vector_len,), src_int_ty))
         if vector_len % 2:
           reg = utils.vector_concat([reg, llvm.mlir_undef(ir.VectorType.get((1,), src_int_ty))])
+        convert_vec_len = longest_useful_vector
+        base_idx = 0
         result_vecs = []
-        for base_idx in range(0, even_vector_len, 2):
-          pair_vec = utils.vector_slice(reg, slice(base_idx, base_idx + 2))
-          new_pair_vec = do_convert(pair_vec)
-          assert new_pair_vec.type == ir.VectorType.get((2,), tgt_int_ty)
-          result_vecs.append(new_pair_vec)
+        while convert_vec_len >= 2:
+          while (next_base_idx := base_idx + convert_vec_len) <= even_vector_len:
+            vec = utils.vector_slice(reg, slice(base_idx, next_base_idx))
+            new_vec = do_convert(vec, convert_vec_len)
+            assert new_vec.type == ir.VectorType.get((convert_vec_len,), tgt_int_ty)
+            result_vecs.append(new_vec)
+            base_idx = next_base_idx
+          convert_vec_len //= 2
         new_reg = utils.vector_concat(result_vecs)
         if vector_len % 2:
           new_reg = utils.vector_slice(new_reg, slice(0, vector_len))
