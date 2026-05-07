@@ -100,7 +100,9 @@ def _pallas_call_abstract_eval(
 
   effs: Set[jax_core.Effect] = {*pallas_core.get_interpret_effects(interpret)}
   if not effs and getattr(compiler_params, "has_side_effects", False):
-    effs = {jax_core.GenericEffect(pallas_call_p)}
+    # TODO(slebedev): Fix internal breakages and add
+    # ``jax_core.GenericEffect(pallas_call_p)`` here.
+    effs = jax_core.no_effects
 
   # closed-over refs and dynamic grid bounds aren't reflected in
   # input_output_aliases, though they are present in `avals`, so split them off
