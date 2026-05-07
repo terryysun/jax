@@ -932,7 +932,7 @@ def lower_jaxpr_into_pipelined_module(
 ) -> None:
   backend = lowering_context.module_context.get_backend(optional=True)
   # NOTE: We should bump this periodically
-  if backend is not None and is_cloud_tpu_older_than(2025, 8, 1, backend):
+  if backend is not None and is_cloud_tpu_older_than(2026, 4, 1, backend):
     platform_version = xla_bridge.get_backend().platform_version
     raise RuntimeError(
         "Pallas TPU requires a libtpu version that's at most a month old. Found"
@@ -1299,7 +1299,7 @@ def lower_jaxpr_into_unpipelined_module(
     )
   backend = lowering_context.module_context.get_backend(optional=True)
   # NOTE: We should bump this periodically
-  if backend is not None and is_cloud_tpu_older_than(2025, 8, 1, backend):
+  if backend is not None and is_cloud_tpu_older_than(2026, 4, 1, backend):
     platform_version = xla_bridge.get_backend().platform_version
     raise RuntimeError(
         "Pallas TPU requires a libtpu version that's at most a month old. Found"
@@ -2636,8 +2636,6 @@ def _dot_general_lowering_rule(
       and (
           lhs_aval.dtype != jnp.float32
           or rhs_aval.dtype != jnp.float32
-          or ctx.forward_compatible
-          or ctx.is_cloud_tpu_older_than(2025, 8, 10)
       )
   ):
     if ctx.avals_in[0].shape != ctx.avals_in[1].shape:
@@ -2790,10 +2788,6 @@ def _convert_element_type_lowering_rule(
   unsigned = jnp.unsignedinteger
   old_bitwidth = dtypes.itemsize_bits(old_dtype)
   new_bitwidth = dtypes.itemsize_bits(new_dtype)
-  # TODO(apaszke): Remove a month after the date.
-  fwd_compat = ctx.forward_compatible or ctx.is_cloud_tpu_older_than(
-      2026, 3, 10
-  )
   if _from(floating) and _to(floating):
     if old_bitwidth < new_bitwidth:
       return arith.extf(out_type, x)
@@ -2814,9 +2808,9 @@ def _convert_element_type_lowering_rule(
     return arith.fptosi(out_type, x)
   elif _from(signed) and _to(floating):
     return arith.sitofp(out_type, x)
-  elif _from(floating) and _to(unsigned) and not fwd_compat:
+  elif _from(floating) and _to(unsigned):
     return arith.fptoui(out_type, x)
-  elif _from(unsigned) and _to(floating) and not fwd_compat:
+  elif _from(unsigned) and _to(floating):
     return arith.uitofp(out_type, x)
   elif old_dtype == jnp.bool_ and _to(integer):
     # bool is either 0 or 1 in integer representation hence unsigned.
@@ -3378,12 +3372,6 @@ def _integer_pow_lowering_rule(ctx: LoweringRuleContext, x, *, y):
 def _exp2_lowering_rule(ctx: LoweringRuleContext, x, accuracy=None):
   if accuracy is not None:
     raise NotImplementedError("Not implemented: accuracy")
-  if ctx.forward_compatible or ctx.is_cloud_tpu_older_than(2025, 7, 26):
-    # exp2 in JAX lowers to exp(ln2 * x), not to pow2. We match that behavior
-    # here.
-    return lower_fun(
-        lambda x: jnp.exp(jnp.astype(np.log(2), x.dtype) * x),
-    )(ctx, x)
   return mlir_math.exp2(x)
 
 
@@ -4591,10 +4579,7 @@ def _dma_wait_lowering_rule(ctx: LoweringRuleContext, *args, tree,
     core_id = None
 
   def _dma_wait(src_ref, dst_ref, sem) -> list[ir.Value]:
-    if ctx.forward_compatible or ctx.is_cloud_tpu_older_than(2025, 7, 27):
-      tpu.wait_dma2(sem, src_ref, dst_ref, core_id=core_id)
-    else:
-      tpu.wait_dma2(sem, src_ref, dst_ref, device_id=device_id, core_id=core_id)
+    tpu.wait_dma2(sem, src_ref, dst_ref, device_id=device_id, core_id=core_id)
     return []
 
   return lower_with_transformed_refs(_dma_wait, [src, dst, sem], [src_aval, dst_aval, sem_aval], block_shapes[:3])
