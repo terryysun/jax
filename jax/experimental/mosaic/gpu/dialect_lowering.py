@@ -2012,7 +2012,7 @@ def _permutation_to_affine_map_attr(
   return ir.AffineMapAttr.get(ir.AffineMap.get_permutation(permutation))
 
 
-@_register_lowering(memref.TransposeOp)
+@_register_lowering(memref.TransposeOp, support_warp_semantics=True)
 def _memref_transpose_op_lowering_rule(
     ctx: LoweringContext, op: memref.TransposeOp
 ) -> Sequence[ir.Value]:
