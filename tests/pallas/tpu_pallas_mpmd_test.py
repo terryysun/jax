@@ -786,6 +786,8 @@ class MpmdHijaxTest(jtu.JaxTestCase):
     self.assertArraysEqual(x1.x1, xt.x1)
 
   def test_parallel_subkernels_hijax(self):
+    if pltpu.get_tpu_info().sparse_core is None:
+      self.skipTest("Test needs a TPU with a sparse core")
     if not jtu.is_cloud_tpu_at_least(2026, 3, 28):
       self.skipTest("Needs a newer libtpu")
     xt = WeirdTuple(
