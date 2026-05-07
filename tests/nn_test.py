@@ -335,6 +335,21 @@ class NNFunctionsTest(jtu.JaxTestCase):
     self.assertAllClose(dV_ref, dV_ans, rtol=.01, atol=.01)
     self.assertAllClose(dbias_ref, dbias_ans, rtol=.02, atol=.02)
 
+  def testDotProductAttentionFloat64MaskDebugInfs(self):
+    # Regression test for https://github.com/jax-ml/jax/issues/37422
+    with jax.enable_x64():
+      T, S, K, N, H = 5, 7, 3, 6, 11
+      mask = jnp.arange(S) <= S // 2
+      with self.assertNoWarnings():
+        with jax.debug_infs(True):
+          out = nn.dot_product_attention(
+              jnp.zeros((T, N, H), dtype=jnp.float64),
+              jnp.zeros((S, K, H), dtype=jnp.float64),
+              jnp.zeros((S, K, H), dtype=jnp.float64),
+              mask=mask,
+          )
+          out.block_until_ready()
+
   @parameterized.product(
       batch_size=[1, 16],
       use_vmap=[False, True],
