@@ -599,6 +599,16 @@ class ConstraintSystemTest(parameterized.TestCase):
       tiling = cs.TMEMLayout(layout)
       self.assertFalse(cs.Divides(tiling, (3, 64)).holds())
 
+  @parameterized.parameters(
+      fa.WGSplatFragLayout((4, 32)),
+      fa.WGStridedFragLayout((4, 32), vec_size=1),
+  )
+  def test_divides_constraints_for_strided_and_splat_are_satisfied_for_any_tiling(
+      self, layout
+  ):
+    tiling = cs.RegisterLayout(layout)
+    self.assertTrue(cs.Divides(tiling, (2, 16)).holds())
+
   def test_reduce_merges_divides_constraints_on_same_variable(self):
     v0, v1 = cs.Variable(0), cs.Variable(1)
     constraints = [

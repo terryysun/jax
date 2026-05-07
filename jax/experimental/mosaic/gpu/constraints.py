@@ -644,6 +644,9 @@ class Divides:
 
   `expr` is not allowed to contain more dimensions than `tiling_multiple`, and
   this constraint therefore also constrains the rank of `expr`.
+
+  If `expr` is a `RegisterLayout` of `WGStridedFragLayout` or
+  `WGSplatFragLayout` we return True.
   """
   expr: Expression
   tiling_multiple: tuple[int, ...]
@@ -655,6 +658,10 @@ class Divides:
         return True
       case SMEMTiling(value=lc.TileTransform(tiling=t)):
         tiling = t
+      case RegisterLayout(
+          value=fa.WGStridedFragLayout() | fa.WGSplatFragLayout()
+      ):
+        return True
       case RegisterLayout(value=fa.TiledLayout() as layout):
         tiling = layout.base_tile_shape
       case TMEMLayout(value):
