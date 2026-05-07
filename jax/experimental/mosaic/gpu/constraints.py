@@ -677,6 +677,37 @@ class Divides:
 
 
 @dataclasses.dataclass(frozen=True)
+class MinorDimDivisibleBy:
+  """States that the minor dimension of the `expr` tiling is divisible by `divisor`.
+
+  If the last dimension is untiled, then `true` is returned.
+
+  If `expr` is not `SMEMTiling` but any other constant `ValueError` is raised.
+  """
+  expr: Expression
+  divisor: int
+
+  def holds(self) -> bool | None:
+    match self.expr:
+      case SMEMTiling(value=None):
+        return True
+      case SMEMTiling(value=lc.TileTransform(tiling=t)):
+        tiling = t
+      case Constant() as c:
+        raise ValueError(f"Unexpected value {c} in MinorDimDivisibleBy constraint")
+      case _:
+        return None
+
+    if not tiling:
+      return True
+
+    return tiling[-1] % self.divisor == 0
+
+  def __str__(self):
+    return f"{self.expr}.tiling[-1] % {self.divisor} == 0"
+
+
+@dataclasses.dataclass(frozen=True)
 class IsValidMmaTiling:
   """States that the `expr` SMEM tiling must be compatible with MMA requirements.
 
@@ -753,6 +784,7 @@ Constraint = (
     | IsValidMmaTiling
     | Divides
     | IsSupportedBroadcast
+    | MinorDimDivisibleBy
 )
 
 
@@ -802,6 +834,11 @@ def reduce_constraint(
       if isinstance(expr_red, Unsatisfiable):
         return Unsatisfiable()
       return Divides(expr_red, tiling_multiple)
+    case MinorDimDivisibleBy(expr=expr, divisor=divisor):
+      expr_red = reduce_expression(expr, assignments)
+      if isinstance(expr_red, Unsatisfiable):
+        return Unsatisfiable()
+      return MinorDimDivisibleBy(expr_red, divisor)
     case IsSupportedBroadcast(src=src, dst=dst, dims=dims):
       src_red = reduce_expression(src, assignments)
       dst_red = reduce_expression(dst, assignments)
@@ -864,6 +901,8 @@ class ConstraintSystem:
         case IsValidMmaTiling(expr=expr):
           extract_variables(expr)
         case Divides(expr=expr):
+          extract_variables(expr)
+        case MinorDimDivisibleBy(expr=expr):
           extract_variables(expr)
         case IsSupportedBroadcast(src=src, dst=dst):
           extract_variables(src)

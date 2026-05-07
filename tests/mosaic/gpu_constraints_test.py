@@ -765,6 +765,34 @@ class ConstraintSystemTest(parameterized.TestCase):
         cs.IsSupportedBroadcast(RL(src), RL(dst), dims).holds(), holds
     )
 
+  @parameterized.parameters(
+      (cs.SMEMTiling(lc.TileTransform((2, 8))), 4, True),
+      (cs.SMEMTiling(lc.TileTransform((2, 8))), 3, False),
+      (cs.SMEMTiling(lc.TileTransform(())), 4, True),
+      (cs.SMEMTiling(None), 4, True),
+  )
+  def test_minor_dim_divisible_by_constraint_holds(self, tiling, divisor, expected):
+    self.assertEqual(cs.MinorDimDivisibleBy(tiling, divisor).holds(), expected)
+
+  def test_reduce_minor_dim_divisible_by_divisor_holds(self):
+    v0 = V(0)
+    tiling = cs.SMEMTiling(lc.TileTransform((2, 8)))
+    system = cs.ConstraintSystem(
+        assignments={v0: tiling},
+        constraints=[cs.MinorDimDivisibleBy(v0, 4)],
+    )
+    reduced = cs.reduce(system)
+    self.assertEqual(reduced.constraints, [])
+
+  def test_reduce_minor_dim_divisible_by_nondivisible_divisor_returns_unsat(self):
+    v0 = V(0)
+    tiling = cs.SMEMTiling(lc.TileTransform((2, 8)))
+    system = cs.ConstraintSystem(
+        assignments={v0: tiling},
+        constraints=[cs.MinorDimDivisibleBy(v0, 3)],
+    )
+    self.assertIsInstance(cs.reduce(system), cs.Unsatisfiable)
+
 
 if __name__ == "__main__":
   parameterized.absltest.main(testLoader=jtu.JaxTestLoader())
