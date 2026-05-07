@@ -547,8 +547,6 @@ class MpmdTest(PallasSCTest):
         axis_name="s_core", num_cores=self.sc_info.num_cores
     )
 
-    x = jnp.arange(128 if use_tc_tiling else self.num_lanes, dtype=jnp.int32)
-
     def vector_subcore_fn(_, tec_sem, scs_sem):
       device_id = ({"s_core": jax.lax.axis_index("s_core")} if full_core_spec
                    else None)
@@ -567,27 +565,117 @@ class MpmdTest(PallasSCTest):
       if signalling_direction in ("tec_to_scs", "both"):
         pl.semaphore_wait(scs_sem, jax.lax.axis_size("subcore"))
 
-    device_mesh = jax.make_mesh((jax.device_count(),), axis_names=("x",))
-
-    @functools.partial(jax.shard_map, out_specs=None, check_vma=False)
     def test_mpmd_map():
-      pl.kernel(
+      jax.jit(
+          pl.kernel(
+              body=[vector_subcore_fn, scalar_subcore_fn],
+              mesh=[v_mesh, s_mesh],
+              out_type=jax.ShapeDtypeStruct([256], jnp.int32),
+              compiler_params=pltpu.CompilerParams(
+                  use_tc_tiling_on_sc=use_tc_tiling,
+              ),
+              scratch_types=[
+                  # SCS -> TEC
+                  pltpu.SemaphoreType.REGULAR(()) @ v_mesh,
+                  # TEC -> SCS
+                  pltpu.SemaphoreType.REGULAR(()) @ s_mesh,
+              ],
+          )
+      )()
+
+    jax.block_until_ready(test_mpmd_map())
+
+  def test_copy_with_cross_core_signaling(self):
+    if not jtu.is_cloud_tpu_at_least(2026, 5, 15):
+      self.skipTest("Needs a newer libtpu")
+
+    v_mesh = plsc.VectorSubcoreMesh(
+        core_axis_name="core", subcore_axis_name="subcore",
+        num_cores=self.sc_info.num_cores,
+        num_subcores=self.sc_info.num_subcores,
+    )
+    s_mesh = plsc.ScalarSubcoreMesh(
+        axis_name="core", num_cores=self.sc_info.num_cores
+    )
+    num_cores = v_mesh.num_cores
+    num_subcores = v_mesh.num_subcores
+    x1 = jnp.arange(num_cores * 8 * 128, dtype=jnp.int32).reshape(
+        num_cores, 8, 128
+    )
+    x2 = jnp.arange(
+        num_cores * num_subcores * 8 * 128, dtype=jnp.int32
+    ).reshape(num_cores, num_subcores, 8, 128)
+
+    def _barrier(my_sem, scs_sem, tec_sem):
+      num_cores = jax.lax.axis_size("core")
+      num_subcores = jax.lax.axis_size("subcore")
+      for i in range(num_cores):
+        pl.semaphore_signal(scs_sem, device_id={"core": i})
+        for j in range(num_subcores):
+          pl.semaphore_signal(tec_sem, device_id={"core": i, "subcore": j})
+      pl.semaphore_wait(my_sem, num_cores + num_cores * num_subcores)
+
+    def vector_subcore_fn(x1_ref, x2_ref, o1_ref, o2_ref, tec_sem, scs_sem):
+      del x2_ref, o2_ref
+      num_cores = jax.lax.axis_size("core")
+      _barrier(tec_sem, scs_sem, tec_sem)
+
+      # Wait for scalar cores to tell us that we can start.
+      pl.semaphore_wait(tec_sem, num_cores)
+
+      # Copy from x1 to o1.
+      i, j = jax.lax.axis_index("core"), jax.lax.axis_index("subcore")
+      pltpu.sync_copy(x1_ref.at[i, j], o1_ref.at[i, j])
+
+      # Tell scalar cores they can start
+      for i in range(jax.lax.axis_size("core")):
+        pl.semaphore_signal(scs_sem, device_id={"core": i})
+
+      # Wait for scalar cores to tell us they are done.
+      pl.semaphore_wait(tec_sem, num_cores)
+
+    def scalar_subcore_fn(x1_ref, x2_ref, o1_ref, o2_ref, tec_sem, scs_sem):
+      del x1_ref, o1_ref
+      num_cores = jax.lax.axis_size("core")
+      num_subcores = jax.lax.axis_size("subcore")
+
+      _barrier(scs_sem, scs_sem, tec_sem)
+
+      # Tell vector subcores to start.
+      for i in range(num_cores):
+        for j in range(num_subcores):
+          pl.semaphore_signal(tec_sem, device_id={"core": i, "subcore": j})
+
+      # Wait for vector subcores to tell us they are done.
+      pl.semaphore_wait(scs_sem, num_cores * num_subcores)
+
+      # Copy from x2 to o2.
+      i = jax.lax.axis_index("core")
+      pltpu.sync_copy(x2_ref.at[i], o2_ref.at[i])
+
+      # Tell vector cores we are done.
+      for i in range(num_cores):
+        for j in range(num_subcores):
+          pl.semaphore_signal(tec_sem, device_id={"core": i, "subcore": j})
+
+    @jax.jit
+    def f(x1, x2):
+      return pl.kernel(
           body=[vector_subcore_fn, scalar_subcore_fn],
           mesh=[v_mesh, s_mesh],
-          out_type=jax.ShapeDtypeStruct([x.size * 2], x.dtype),
-          compiler_params=pltpu.CompilerParams(
-              use_tc_tiling_on_sc=use_tc_tiling,
-          ),
+          out_type=(jax.typeof(x1), jax.typeof(x2)),
+          compiler_params=pltpu.CompilerParams(use_tc_tiling_on_sc=True),
           scratch_types=[
               # SCS -> TEC
               pltpu.SemaphoreType.REGULAR(()) @ v_mesh,
               # TEC -> SCS
               pltpu.SemaphoreType.REGULAR(()) @ s_mesh,
           ],
-      )()
+      )(x1, x2)
 
-    with jax.sharding.set_mesh(device_mesh):
-      test_mpmd_map()
+    o1, o2 = f(x1, x2)
+    np.testing.assert_array_equal(o1, x1)
+    np.testing.assert_array_equal(o2, x2)
 
   def test_parallel_subkernels_semaphores_missing_subcore_axis(self):
     if not jtu.is_cloud_tpu_at_least(2026, 3, 1):
