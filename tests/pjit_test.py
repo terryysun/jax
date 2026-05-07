@@ -10643,6 +10643,19 @@ class ShardingInTypesTest(jtu.JaxTestCase):
     self.assertEqual(jax.typeof(b).sharding,
                      NamedSharding(mesh.abstract_mesh, P('x')))
 
+  def test_dot_lhs_rhs_mesh_empty(self):
+    mesh = jtu.create_mesh((2,), ("x",), axis_types=(AxisType.Explicit,))
+    x = jax.device_put(np.ones((32, 128)), NamedSharding(mesh, jax.P("x")))
+    w = jnp.ones((128, 64))
+
+    def f(w, x):
+      x = jax.lax.dot(x, w)
+      return x.sum()
+
+    with jax.set_mesh(mesh):
+      dw = jax.jit(jax.grad(f))(w, x)
+      self.assertEqual(dw.sharding, NamedSharding(mesh, P(None, None)))
+
 
 @jtu.pytest_mark_if_available('multiaccelerator')
 class PJitErrorTest(jtu.JaxTestCase):

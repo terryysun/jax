@@ -5682,6 +5682,8 @@ def _dot_general_transpose_lhs(g, x, y, *, dimension_numbers, precision,
   xs = x.aval.to_ct_aval().sharding
   inverse_spec = tuple(xs.spec[o] for o in unsorted_axes)
   ds = xs.update(spec=xs.spec.update(partitions=inverse_spec))
+  if ds.mesh.empty:
+    ds = core.get_cur_mesh_sharding()
   dot_general_out = dot_general(g, y, dims, precision=precision,
                                 preferred_element_type=preferred_element_type,
                                 out_sharding=ds)
