@@ -170,7 +170,7 @@ class InterpretTest(jtu.JaxTestCase):
     def kernel(x_ref, o_ref):
       o_ref[...] = x_ref[...]
 
-    @functools.partial(jax.jit, static_argnums=(0, 1))
+    @jax.jit(static_argnums=(0, 1))
     def run(input_offset, output_offset):
       return pl.pallas_call(
           kernel,
@@ -529,7 +529,7 @@ class InterpretTest(jtu.JaxTestCase):
       del indices
       o_ref[...] = x_ref[...]
 
-    @functools.partial(jax.jit, static_argnums=(2,))
+    @jax.jit(static_argnums=(2,))
     def block_dynamic_slice(x, starts, sizes):
       grid_spec = pltpu.PrefetchScalarGridSpec(
           num_scalar_prefetch=1,

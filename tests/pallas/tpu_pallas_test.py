@@ -584,7 +584,7 @@ class PallasCallScalarPrefetchTest(ptu.PallasTPUTest):
 
     def kernel(_, x_ref, y_ref):
       y_ref[...] = x_ref[...] + 1.
-    @partial(jax.jit, donate_argnums=(0,))
+    @jax.jit(donate_argnums=(0,))
     def f(x):
       return self.pallas_call(
           kernel,
@@ -1333,7 +1333,7 @@ class PallasCallDMATest(ptu.PallasTPUTest):
     x = jnp.arange(8 * 128.).reshape(8, 128)
     y_init = -jnp.arange(8 * 128.).reshape(8, 128)
 
-    @functools.partial(jax.jit, donate_argnums=(1,))
+    @jax.jit(donate_argnums=(1,))
     def f(x, y_init):
       y_init = pltpu.with_memory_space_constraint(y_init, pltpu.HBM)
       y_out = self.pallas_call(
@@ -1400,7 +1400,7 @@ class PallasCallDMATest(ptu.PallasTPUTest):
     )
     x = jnp.arange(8 * 128.0).reshape((8, 128))
 
-    @functools.partial(jax.jit, out_shardings=host_sharding)
+    @jax.jit(out_shardings=host_sharding)
     def f(x):
       return self.pallas_call(
           kernel,

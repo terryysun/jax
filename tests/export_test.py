@@ -218,7 +218,7 @@ class JaxExportTest(jtu.JaxTestCase):
 
     with self.subTest("static_argnames"):
 
-      @functools.partial(jax.jit, static_argnames=["c"])
+      @jax.jit(static_argnames=["c"])
       def f(x, *, c):
         return c * jnp.sin(x)
 
@@ -229,7 +229,7 @@ class JaxExportTest(jtu.JaxTestCase):
 
     with self.subTest("static_argnums"):
 
-      @functools.partial(jax.jit, static_argnums=[1])
+      @jax.jit(static_argnums=[1])
       def g(x, c):
         return c * jnp.sin(x)
 
@@ -1343,7 +1343,7 @@ class JaxExportTest(jtu.JaxTestCase):
       self.skipTest("Need at least 2 devices")
 
     mesh_1 = Mesh(jax.local_devices()[:1], "i")
-    @functools.partial(jax.jit,
+    @jax.jit(
                        in_shardings=NamedSharding(mesh_1, P("i")))
     def f_with_sharding(x):
       return jnp.sum(x ** 2, axis=0)
@@ -1367,7 +1367,7 @@ class JaxExportTest(jtu.JaxTestCase):
       self.skipTest("Need at least 3 devices")
 
     mesh_1 = Mesh(jax.local_devices()[:2], "i")
-    @functools.partial(jax.jit,
+    @jax.jit(
                        in_shardings=NamedSharding(mesh_1, P("i")))
     def f_with_sharding(x):
       return jnp.sum(x ** 2, axis=0)

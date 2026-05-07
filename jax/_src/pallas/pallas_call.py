@@ -77,7 +77,7 @@ pallas_call_p.multiple_results = True
 def _pallas_call_impl(*args, **params):
 
   # Call the lowering path
-  @partial(api.jit, inline=True)
+  @api.jit(inline=True)
   def _jit_run(*args):
     return pallas_call_p.bind(*args, **params)
 
@@ -1499,7 +1499,7 @@ def _pallas_call(
   flat_out_shapes_with_paths, out_tree = tree_util.tree_flatten_with_path(out_shape)
   out_paths, flat_out_shapes = unzip2(flat_out_shapes_with_paths)
 
-  @partial(api.jit, inline=True)
+  @api.jit(inline=True)
   def wrapped(*args):
     flat_args_with_paths, in_tree = tree_util.tree_flatten_with_path(args)
     in_paths, flat_args = unzip2(flat_args_with_paths)

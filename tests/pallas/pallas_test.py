@@ -66,7 +66,7 @@ intx = dtypes.default_int_dtype()
 floatx = dtypes.default_float_dtype()
 
 
-@functools.partial(jax.jit, static_argnames=["bm", "bn", "bk",
+@jax.jit(static_argnames=["bm", "bn", "bk",
                                              "interpret", "debug"])
 def matmul_block_spec(x, y, *, bm, bn, bk, interpret, debug=False):
   m, n, k = x.shape[0], y.shape[1], x.shape[1]
@@ -1375,7 +1375,7 @@ class PallasCallInputOutputAliasingTest(ptu.PallasTest):
 
     def kernel(x_ref, y_ref):
       y_ref[...] = x_ref[...] + 1.
-    @functools.partial(jax.jit, donate_argnums=(0,))
+    @jax.jit(donate_argnums=(0,))
     def f(x):
       return self.pallas_call(
           kernel,
@@ -1405,7 +1405,7 @@ class PallasCallInputOutputAliasingTest(ptu.PallasTest):
         block_shape=(1,), index_map=lambda *_: (0,), memory_space=pltpu.SMEM
     )
 
-    @functools.partial(jax.jit, donate_argnums=(0,))
+    @jax.jit(donate_argnums=(0,))
     def f(x_in):
       return self.pallas_call(
           kernel,
@@ -1440,7 +1440,7 @@ class PallasCallInputOutputAliasingTest(ptu.PallasTest):
         block_shape=x_vector.shape, index_map=lambda *_: (0,) * x_vector.ndim
     )
 
-    @functools.partial(jax.jit, donate_argnums=(0, 1))
+    @jax.jit(donate_argnums=(0, 1))
     def f(x_scalar_in, x_vector_in):
       return self.pallas_call(
           kernel,

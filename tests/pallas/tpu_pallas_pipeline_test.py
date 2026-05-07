@@ -1111,7 +1111,7 @@ class PallasCallMegacoreTest(jtu.JaxTestCase):
     np.testing.assert_allclose(func(x, y), x @ y, atol=7e-5)
 
 
-@functools.partial(jax.jit, static_argnames=['bm', 'bk', 'bn'])
+@jax.jit(static_argnames=['bm', 'bk', 'bn'])
 def matmul(x: jax.Array, y: jax.Array, *, bm: int, bk: int, bn: int):
 
   m, k = x.shape

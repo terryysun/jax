@@ -483,7 +483,7 @@ class ShardingTest(tf_test_util.JaxToTfTestCase):
     mesh = Mesh(self.devices, axis_names=('x'))
     a = np.arange(4 * 4, dtype=np.float32).reshape((4, 4))
 
-    @partial(jax.jit,
+    @jax.jit(
              in_shardings=(NamedSharding(mesh, P("x", None)),),
              out_shardings=NamedSharding(mesh, P(None, "x")))
     @partial(shard_map, mesh=mesh,
@@ -522,7 +522,7 @@ class ShardingTest(tf_test_util.JaxToTfTestCase):
   def test_repro_xla_bug_shmap_collective_permute(self):
     mesh = Mesh(self.devices, axis_names=('x'))
 
-    @partial(jax.jit,
+    @jax.jit(
              in_shardings=(P('x', None),), out_shardings=P('x', None))
     @partial(shard_map, mesh=mesh,
              in_specs=(P('x', None),), out_specs=P('x', None))
@@ -558,7 +558,7 @@ class ShardingTest(tf_test_util.JaxToTfTestCase):
     mesh = Mesh(self.devices, axis_names=("x"))
     a = np.arange(4 * 4, dtype=np.float32).reshape((4, 4))
 
-    @partial(jax.jit,
+    @jax.jit(
              in_shardings=(NamedSharding(mesh, P("x", None)),),
                            out_shardings=NamedSharding(mesh, P("x", None)))
     @partial(shard_map, mesh=mesh,

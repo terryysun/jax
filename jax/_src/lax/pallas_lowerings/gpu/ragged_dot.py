@@ -201,7 +201,7 @@ def _gpu_ragged_dot_kernel(
     loops.fori_loop(0, cdiv(size.m - last_offset, block.m), set_zero, None)
 
 
-@partial(api.jit, static_argnums=list(range(3, 14)))
+@api.jit(static_argnums=list(range(3, 14)))
 def gmm(
   x: Array,  # [m, k]
   A: Array,  # [g, k, n]
@@ -346,7 +346,7 @@ def _tgmm_ragged_dot_kernel(
                 mask=rmask[:, None] & cmask[None, :])
 
 
-@partial(api.jit, static_argnums=list(range(3, 13)))
+@api.jit(static_argnums=list(range(3, 13)))
 def tgmm(
   x: Array,  # [m, k]
   y: Array,  # [m, n]

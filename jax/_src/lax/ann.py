@@ -29,7 +29,7 @@ Usage::
   #
   # Returns:
   #   (f32[qy_size, k], i32[qy_size, k])
-  @functools.partial(jax.jit, static_argnames=["k", "recall_target"])
+  @jax.jit(static_argnames=["k", "recall_target"])
   def mips(qy, db, k=10, recall_target=0.95):
     dists = jax.lax.dot(qy, db.transpose())
     # Computes max_k along the last dimension
@@ -128,7 +128,7 @@ def approx_max_k(operand: Array,
   >>> import functools
   >>> import jax
   >>> import numpy as np
-  >>> @functools.partial(jax.jit, static_argnames=["k", "recall_target"])
+  >>> @jax.jit(static_argnames=["k", "recall_target"])
   ... def mips(qy, db, k=10, recall_target=0.95):
   ...   dists = jax.lax.dot(qy, db.transpose())
   ...   # returns (f32[qy_size, k], i32[qy_size, k])
@@ -187,7 +187,7 @@ def approx_min_k(operand: Array,
   >>> import functools
   >>> import jax
   >>> import numpy as np
-  >>> @functools.partial(jax.jit, static_argnames=["k", "recall_target"])
+  >>> @jax.jit(static_argnames=["k", "recall_target"])
   ... def l2_ann(qy, db, half_db_norms, k=10, recall_target=0.95):
   ...   dists = half_db_norms - jax.lax.dot(qy, db.transpose())
   ...   return jax.lax.approx_min_k(dists, k=k, recall_target=recall_target)

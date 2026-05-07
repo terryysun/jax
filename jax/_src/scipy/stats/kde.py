@@ -183,7 +183,7 @@ class gaussian_kde:
                       in_axes=1)(sm.dataset)
     return jnp.sum(result * sm.weights)
 
-  @partial(api.jit, static_argnames=("shape",))
+  @api.jit(static_argnames=("shape",))
   def resample(self, key, shape=()):
     r"""Randomly sample a dataset from the estimated pdf
 

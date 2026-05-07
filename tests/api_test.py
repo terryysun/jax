@@ -764,7 +764,7 @@ class JitTest(jtu.BufferDonationTestCase):
 
     class A:
 
-      @functools.partial(jit, static_argnums=(0,))
+      @jit(static_argnums=(0,))
       def my_func_jit(self, x):
         return x+2
 
@@ -775,7 +775,7 @@ class JitTest(jtu.BufferDonationTestCase):
 
       class A:
 
-        @functools.partial(jit, static_argnums=(0,))
+        @jit(static_argnums=(0,))
         @classmethod
         def my_classmethod_jit(cls, x):
           return x+2
@@ -786,7 +786,7 @@ class JitTest(jtu.BufferDonationTestCase):
 
       class A:
 
-        @functools.partial(jit)
+        @jit
         @staticmethod
         def my_staticmethod_jit(x):
           return x + 2

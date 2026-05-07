@@ -151,7 +151,6 @@ With CUTLASS installed, we import the libraries we'll use throughout the noteboo
 
 ```{code-cell}
 import os
-from functools import partial
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # suppress TF/XLA info & warnings
 os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir=/usr/local/cuda"
@@ -434,13 +433,13 @@ out_3d = call(x_3d, y_3d)  # tensor args → managed by XLA
 >
 > CUTLASS distinguishes between values known at **compile time** (static) and values known only at **runtime** (dynamic). Static integers — like tensor shapes passed with `use_static_tensors=True` or constants like `BLOCK_SIZE` — are baked into the generated CUDA code, letting the compiler unroll loops, optimize memory access patterns, and eliminate branches. Dynamic values like `alpha` are passed as regular kernel arguments and read at runtime. As a rule of thumb: make shapes and tile sizes static, keep data-dependent values dynamic.
 
-Note that `jax_saxpy` uses `@partial(jax.jit, static_argnums=(2,))` to mark `alpha` as a static argument to JAX. This means JAX will recompile the function whenever `alpha` changes — which is fine for a value that rarely varies, and lets the CUTLASS JIT bake the exact `alpha` value into the generated CUDA code.
+Note that `jax_saxpy` uses `@jax.jit(static_argnums=(2,))` to mark `alpha` as a static argument to JAX. This means JAX will recompile the function whenever `alpha` changes — which is fine for a value that rarely varies, and lets the CUTLASS JIT bake the exact `alpha` value into the generated CUDA code.
 
 ```{code-cell}
 BLOCK = 256
 
 
-@partial(jax.jit, static_argnums=(2,))
+@jax.jit(static_argnums=(2,))
 def jax_saxpy(x, y, alpha=2.0):
   """JAX-compatible SAXPY using CUTLASS kernel."""
   N = x.shape[0]
@@ -653,7 +652,7 @@ out_flat = call(x_flat, bias)   # two input tensors: x and bias
 ```
 
 ```{code-cell}
-@partial(jax.jit, static_argnums=(2,))
+@jax.jit(static_argnums=(2,))
 def jax_fused_bias_relu(x, bias, width):
   """JAX-compatible fused Bias+ReLU using CUTLASS kernel.
 

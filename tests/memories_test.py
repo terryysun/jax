@@ -405,7 +405,7 @@ class DevicePutTest(jtu.JaxTestCase):
     s_dev = s_host.with_memory_kind('device')
     inp_dev = jax.device_put(np_inp, s_dev)
 
-    @functools.partial(jax.jit, out_shardings=s_host)
+    @jax.jit(out_shardings=s_host)
     def f(a, b):
       x = b * 2
       y = jax.device_put(a, s_dev)
@@ -429,7 +429,7 @@ class DevicePutTest(jtu.JaxTestCase):
         (0,), P(), mem_kind="pinned_host")
     s_dev = s_host.with_memory_kind('device')
 
-    @functools.partial(jax.jit, out_shardings=s_host)
+    @jax.jit(out_shardings=s_host)
     def f(a):
       b = jax.device_put(a, s_dev)
       return b
@@ -447,7 +447,7 @@ class DevicePutTest(jtu.JaxTestCase):
     scalar_inp = 1
     s_host = NamedSharding(mesh, P(), memory_kind="pinned_host")
 
-    @functools.partial(jax.jit, out_shardings=s_host)
+    @jax.jit(out_shardings=s_host)
     def f(scalar_input):
       y = jax.device_put(scalar_input, s_host)
       z = 2
@@ -474,7 +474,7 @@ class DevicePutTest(jtu.JaxTestCase):
     s_host = NamedSharding(mesh, P("x", "y"), memory_kind="pinned_host")
     inp_host = jax.device_put(np_inp, s_host)
 
-    @functools.partial(jax.jit, out_shardings=(s_host, s_host))
+    @jax.jit(out_shardings=(s_host, s_host))
     def f(x):
       return (x, x)
 
@@ -501,7 +501,7 @@ class DevicePutTest(jtu.JaxTestCase):
     )
     scalar_inp = 1
 
-    @functools.partial(jax.jit, out_shardings=(s_host, s_host))
+    @jax.jit(out_shardings=(s_host, s_host))
     def f(x):
       return (x, x)
 
@@ -581,7 +581,7 @@ class DevicePutTest(jtu.JaxTestCase):
     s_host = NamedSharding(mesh, P("x", "y"), memory_kind="pinned_host")
     arr_hbm = jax.device_put(np_inp, s_hbm)
 
-    @functools.partial(jax.jit, out_shardings=s_host)
+    @jax.jit(out_shardings=s_host)
     def f(xs):
       out_tpu = xs + 1.0
       return out_tpu
@@ -646,7 +646,7 @@ class DevicePutTest(jtu.JaxTestCase):
         (8, 2), P("x", "y"), mem_kind="pinned_host")
     s_dev = s_host.with_memory_kind('device')
 
-    @functools.partial(jax.jit, out_shardings=s_dev)
+    @jax.jit(out_shardings=s_dev)
     def f():
       y = jax.device_put(inp_host, s_dev)
       z = y * 2
@@ -806,7 +806,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     tpu_sharding = NamedSharding(mesh, P('data'))
     cpu_sharding = NamedSharding(mesh, P('data'), memory_kind='pinned_host')
 
-    @functools.partial(jax.jit, out_shardings=(tpu_sharding, cpu_sharding))
+    @jax.jit(out_shardings=(tpu_sharding, cpu_sharding))
     def init():
       tpu_array = jax.random.normal(jax.random.key(42), (16,16))
       cpu_array = jax.random.normal(jax.random.key(42), (16,16))
@@ -822,7 +822,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     tpu_sharding = NamedSharding(mesh, P('data'))
     cpu_sharding = NamedSharding(mesh, P(), memory_kind='pinned_host')
 
-    @functools.partial(jax.jit, out_shardings=(tpu_sharding, cpu_sharding))
+    @jax.jit(out_shardings=(tpu_sharding, cpu_sharding))
     def init():
       tpu_array = jax.random.normal(jax.random.key(42), (16, 16))
       cpu_array = jax.random.normal(jax.random.key(42), (16, 16))
@@ -853,7 +853,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     lowered_text = f.lower(jnp.arange(8)).as_text()
     self.assertIn('_xla_compute_type', lowered_text)
 
-    @functools.partial(jax.jit, out_shardings=out_s)
+    @jax.jit(out_shardings=out_s)
     def h(x):
       y = g(x)
       return y * 3
@@ -884,7 +884,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     lowered_text = f.lower(inp).as_text()
     self.assertIn("_xla_compute_type", lowered_text)
 
-    @functools.partial(jax.jit, out_shardings=out_s)
+    @jax.jit(out_shardings=out_s)
     def h(x):
       y = g(x)
       return y * 3
@@ -936,7 +936,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     def g(x):
       return x * 2
 
-    @functools.partial(jax.jit, inline=True)
+    @jax.jit(inline=True)
     def h(x):
       y = g(x)
       return y * 3
@@ -977,7 +977,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     lowered_text = f.lower(jnp.arange(8)).as_text()
     self.assertIn('_xla_compute_type', lowered_text)
 
-    @functools.partial(jax.jit, out_shardings=out_s)
+    @jax.jit(out_shardings=out_s)
     def h(x):
       y = g(x)
       z = jnp.sum(x)
@@ -1243,7 +1243,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     def g(x):
       return x * x
 
-    @functools.partial(jax.jit, out_shardings=s)
+    @jax.jit(out_shardings=s)
     def f(x):
       return g(x)
 
@@ -1300,7 +1300,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     mesh, _, _, inp = _create_inputs((8, 2), P("x", "y"))
     out_s = NamedSharding(mesh, P(), memory_kind="pinned_host")
 
-    @functools.partial(jax.jit, out_shardings=out_s)
+    @jax.jit(out_shardings=out_s)
     def g(x):
       return jnp.sum(x * 2)
 
@@ -1323,7 +1323,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
   def test_jit_in_shardings(self):
     _, s, np_inp, inp = _create_inputs((8, 2), P("x", "y"))
 
-    @functools.partial(jax.jit, in_shardings=s.with_memory_kind("pinned_host"))
+    @jax.jit(in_shardings=s.with_memory_kind("pinned_host"))
     def f(x):
       return x * 2
 
@@ -1341,7 +1341,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
         " device for arg.*"):
       f(inp)  # committed inp raises error.
 
-    @functools.partial(jax.jit, in_shardings=s.with_memory_kind("device"))
+    @jax.jit(in_shardings=s.with_memory_kind("device"))
     def g(x):
       return x * 2
 
@@ -1354,7 +1354,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     mesh, s, np_inp, inp = _create_inputs((8, 2), P("x", "y"), mem_kind="device")
     out_s = NamedSharding(mesh, P(), memory_kind="device")
 
-    @functools.partial(jax.jit, in_shardings=s, out_shardings=out_s)
+    @jax.jit(in_shardings=s, out_shardings=out_s)
     def f(x):
       return jnp.sum(x)
 
@@ -1473,7 +1473,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     s_host = s_hbm.with_memory_kind("pinned_host")
     inp = jax.device_put(np_inp, s_hbm)
 
-    @functools.partial(jax.jit, out_shardings=s_host, donate_argnums=0)
+    @jax.jit(out_shardings=s_host, donate_argnums=0)
     def f(x):
       return x * 2
 
@@ -1489,7 +1489,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     mesh = jtu.create_mesh((2,), "x")
     s = NamedSharding(mesh, P())
 
-    @functools.partial(jax.jit, out_shardings=s, donate_argnums=0)
+    @jax.jit(out_shardings=s, donate_argnums=0)
     def f(inp1):
       return inp1 * 2
 
@@ -1565,7 +1565,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     s = NamedSharding(mesh, P(), memory_kind='pinned_host')
     s_dev = s.with_memory_kind('device')
 
-    @functools.partial(jax.jit, out_shardings=(s, s_dev), donate_argnums=(0, 1))
+    @jax.jit(out_shardings=(s, s_dev), donate_argnums=(0, 1))
     @compute_on('device_host')
     def f(inp1, inp2):
       return inp1 * 2, inp2 * 2
@@ -1586,7 +1586,7 @@ class ComputeOffload(jtu.BufferDonationTestCase):
     mesh = jtu.create_mesh((2,), "x")
     s = NamedSharding(mesh, P(), memory_kind=mem_kind)
 
-    @functools.partial(jax.jit, out_shardings=s, donate_argnums=0)
+    @jax.jit(out_shardings=s, donate_argnums=0)
     def f(inp):
       return inp
 

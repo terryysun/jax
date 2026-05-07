@@ -2751,7 +2751,7 @@ def _binom(n, k):
   return lax.exp(a - b - c)
 
 
-@partial(jit, static_argnames=("n", "dtype"))
+@jit(static_argnames=("n", "dtype"))
 def hadamard(n: int, dtype: DTypeLike = int) -> Array:
   r"""Construct an n-by-n Hadamard matrix.
 
@@ -2786,7 +2786,7 @@ def hadamard(n: int, dtype: DTypeLike = int) -> Array:
   return H
 
 
-@partial(jit, static_argnames=("n", "scale", "dtype"))
+@jit(static_argnames=("n", "scale", "dtype"))
 def dft(n: int, scale: str | None = None, *,
         dtype: DTypeLike | None = None) -> Array:
   r"""Construct an n-by-n discrete Fourier transform matrix.

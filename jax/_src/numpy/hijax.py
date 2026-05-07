@@ -309,7 +309,7 @@ def _searchsorted_impl(sorted_arr: ArrayLike, query: ArrayLike, *, dimension: in
   return fun(sorted_arr, query)
 
 
-@functools.partial(api.jit, static_argnames=["side", "dtype", "unrolled"])
+@api.jit(static_argnames=["side", "dtype", "unrolled"])
 def _searchsorted_scan_impl(
     sorted_arr: Array, query: Array, side: str, dtype: np.dtype, unrolled: bool
 ) -> Array:
@@ -340,7 +340,7 @@ def _searchsorted_scan_impl(
   return carry[1].astype(dtype)
 
 
-@functools.partial(api.jit, static_argnames=["side", "dtype"])
+@api.jit(static_argnames=["side", "dtype"])
 def _searchsorted_sort_impl(
     sorted_arr: Array, query: Array, side: str, dtype: np.dtype
 ) -> Array:
@@ -368,7 +368,7 @@ def _searchsorted_sort_impl(
   ).astype(dtype)
 
 
-@functools.partial(api.jit, static_argnames=["side", "dtype"])
+@api.jit(static_argnames=["side", "dtype"])
 def _searchsorted_compare_all_impl(
     sorted_arr: Array, query: Array, side: str, dtype: np.dtype
 ) -> Array:
