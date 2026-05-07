@@ -95,8 +95,6 @@ def _mpmd_map_abstract_eval(
         continue
       if eff.name not in all_mesh_axis_names:
         effs.add(eff)
-  if getattr(compiler_params, "has_side_effects", False):
-    effs = {jax_core.GenericEffect(mpmd_map_p)}
 
   # TODO(slebedev): Handle pinned buffers as in ``pallas_call``.
   outin_aliases = {
@@ -225,6 +223,14 @@ def _mpmd_map_discharge_rule(
 
 
 state_discharge.register_discharge_rule(mpmd_map_p)(_mpmd_map_discharge_rule)
+
+
+def _mpmd_map_dce_rule(
+    used_outs: list[bool], eqn: pe.JaxprEqn
+) -> tuple[list[bool], pe.JaxprEqn | None]:
+  return [True] * len(eqn.invars), eqn
+
+pe.dce_rules[mpmd_map_p] = _mpmd_map_dce_rule
 
 
 def _mpmd_map_is_high(*args, jaxprs, **params):

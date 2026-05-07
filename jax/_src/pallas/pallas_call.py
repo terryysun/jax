@@ -99,10 +99,6 @@ def _pallas_call_abstract_eval(
   del params  # Unused.
 
   effs: Set[jax_core.Effect] = {*pallas_core.get_interpret_effects(interpret)}
-  if not effs and getattr(compiler_params, "has_side_effects", False):
-    # TODO(slebedev): Fix internal breakages and add
-    # ``jax_core.GenericEffect(pallas_call_p)`` here.
-    effs = jax_core.no_effects
 
   # closed-over refs and dynamic grid bounds aren't reflected in
   # input_output_aliases, though they are present in `avals`, so split them off
@@ -792,6 +788,15 @@ def _pallas_call_batching_rule(
 
 
 batching.fancy_primitive_batchers[pallas_call_p] = _pallas_call_batching_rule
+
+
+def _pallas_call_dce_rule(
+    used_outs: list[bool], eqn: pe.JaxprEqn
+) -> tuple[list[bool], pe.JaxprEqn | None]:
+  del used_outs
+  return [True] * len(eqn.invars), eqn
+
+pe.dce_rules[pallas_call_p] = _pallas_call_dce_rule
 
 
 def checkify_pallas_kernel_body_jaxpr(
