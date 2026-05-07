@@ -151,7 +151,7 @@ class TPUPallasCallMemorySpaceTest(jtu.JaxTestCase):
     else:
       out_sharding = None
 
-    @functools.partial(jax.jit, out_shardings=out_sharding)
+    @jax.jit(out_shardings=out_sharding)
     def f(x):
       x = g(x)
       return x

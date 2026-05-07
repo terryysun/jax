@@ -65,7 +65,7 @@ def matmul_kernel(x_ref, y_ref, o_ref):
   o_ref[...] += x_ref[...] @ y_ref[...]
 
 
-@functools.partial(jax.jit, static_argnames=['block_shape'])
+@jax.jit(static_argnames=['block_shape'])
 def matmul(
     x: jax.Array,
     y: jax.Array,
