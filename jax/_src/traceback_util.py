@@ -14,19 +14,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import functools
 import os
 import traceback
 import types
-from typing import Any, TypeVar, cast
+from typing import TypeVar, cast
 
 from jax._src import config
 from jax._src import util
 from jax._src.lib import _jax
 
 
-C = TypeVar("C", bound=Callable[..., Any])
+# TODO(slebedev): Add `bound=Callable` once facebook/pyrefly#3329 is fixed.
+C = TypeVar("C")
 
 _exclude_paths: list[str] = []
 
@@ -188,11 +188,11 @@ def api_boundary(
   For the "repro" kwargs, see the comments for `repro.boundary`.
   '''
 
-  @functools.wraps(fun)
+  @functools.wraps(fun)  # pyrefly: ignore[bad-argument-type]
   def reraise_with_filtered_traceback(*args, **kwargs):
     __tracebackhide__ = True
     try:
-      return fun(*args, **kwargs)
+      return fun(*args, **kwargs)  # pyrefly: ignore[not-callable]
     except Exception as e:
       mode = _filtering_mode()
       if _is_under_reraiser(e) or mode == "off":
