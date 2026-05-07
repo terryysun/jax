@@ -33,12 +33,11 @@ py_library(
     srcs = [
         "jax2tf_limitations.py",
     ],
-    strict_deps = False,
     visibility = jax_visibility("jax2tf_limitations"),
     deps = [
+        "//jax/_src:dtypes",
         "//jax/_src:internal_test_harnesses",
-        "//jax/_src:test_util",
-    ],
+    ] + py_deps("numpy"),
 )
 
 py_library(
@@ -63,12 +62,13 @@ py_library(
         "converters.py",
         "model_harness.py",
     ],
-    strict_deps = False,
     deps = [
         "//jax",
+        "//jax/experimental/jax2tf",
         "//jax/experimental/jax2tf/tests/flax_models",
         "//third_party/py/jraph",
         "//third_party/py/numpy",
+        "//third_party/py/tensorflow",
         "//third_party/py/tensorflowjs",
     ],
 )
@@ -144,6 +144,7 @@ jax_multiplatform_test(
         "jax2tf",
     ],
     deps = [
+        ":jax2tf_limitations",
         ":tf_test_util",
         "//jax/_src:internal_test_harnesses",
         "//jax/experimental/jax2tf",
@@ -175,6 +176,7 @@ jax_multiplatform_test(
         "nodebug",  # Times out.
     ],
     deps = [
+        ":jax2tf_limitations",
         ":tf_test_util",
         "//jax/_src:internal_test_harnesses",
         "//jax/experimental/jax2tf",
@@ -290,14 +292,11 @@ py_binary(
     data = [
         "//jax/experimental/jax2tf/g3doc:convert_models_results",
     ],
-    strict_deps = False,
     deps = [
         ":models_util",
         "//jax",
-        "//pyglib:resources",
+        "//jax/_src:dtypes",
         "//third_party/py/absl:app",
         "//third_party/py/absl/flags",
-        "//third_party/py/numpy",
-        "//third_party/py/tensorflow",
-    ],
+    ] + py_deps("numpy") + py_deps("tensorflow"),
 )

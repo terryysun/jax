@@ -38,22 +38,20 @@ py_library(
         "__init__.py",
         "jax_to_ir.py",
     ],
-    strict_deps = False,
     tags = [
         "ignore_for_dep=third_party.py.jax.experimental.jax2tf",
         "ignore_for_dep=third_party.py.tensorflow",
     ],
     deps = [
         "//jax",
-    ],
+    ] + py_deps("absl-all"),
 )
 
 py_library(
     name = "jax_to_ir_with_tensorflow",
     srcs = ["jax_to_ir.py"],
-    strict_deps = False,
     deps = [
         "//jax",
         "//jax/experimental/jax2tf",
-    ] + py_deps("tensorflow_core"),
+    ] + py_deps("absl-all") + py_deps("tensorflow_core"),
 )
