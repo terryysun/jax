@@ -96,9 +96,7 @@ def _mpmd_map_abstract_eval(
       if eff.name not in all_mesh_axis_names:
         effs.add(eff)
   if getattr(compiler_params, "has_side_effects", False):
-    # TODO(slebedev): Fix internal breakages and add
-    # ``jax_core.GenericEffect(pallas_call_p)`` here.
-    effs = jax_core.no_effects
+    effs = {jax_core.GenericEffect(mpmd_map_p)}
 
   # TODO(slebedev): Handle pinned buffers as in ``pallas_call``.
   outin_aliases = {
