@@ -421,7 +421,7 @@ class Traced(Stage):
 
   jaxpr = property(lambda self: self._params['jaxpr'])
   fun_name = property(lambda self: self._params['name'])
-  args_info = property(_traced_args_info)
+  args_info = property(_traced_args_info)  # pyrefly: ignore[bad-override]
   out_info = property(_traced_out_info)
   _num_consts = property(lambda self: len(self._consts))
 
