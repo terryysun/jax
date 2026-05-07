@@ -7040,8 +7040,20 @@ batching.primitive_batchers[concatenate_p] = _concatenate_batch_rule
 
 def _concatenate_lower(ctx, *xs, dimension):
   aval_out, = ctx.avals_out
-  out = hlo.concatenate(xs, mlir.i64_attr(dimension))
+  # concatenate can be slow to compile for wide concatenations, so form a
+  # tree of concatenations as a workaround especially for op-by-op mode.
+  # (https://github.com/jax-ml/jax/issues/653).
+  k = 16
+  current_xs = list(xs)
+  dimension_attr = mlir.i64_attr(dimension)
+  while len(current_xs) > 1:
+    current_xs = [hlo.concatenate(current_xs[i:i+k], dimension_attr)
+                  for i in range(0, len(current_xs), k)]
+
+  out = current_xs[0]
+
   return [mlir.lower_with_sharding_in_types(ctx, out, aval_out)]
+
 mlir.register_lowering(concatenate_p, _concatenate_lower)
 
 

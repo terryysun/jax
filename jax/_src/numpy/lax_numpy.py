@@ -4552,14 +4552,8 @@ def concatenate(arrays: np.ndarray | Array | Sequence[ArrayLike],
     arrays_out = util.promote_dtypes(*arrays)
   else:
     arrays_out = [asarray(arr, dtype=dtype) for arr in arrays]
-  # lax.concatenate can be slow to compile for wide concatenations, so form a
-  # tree of concatenations as a workaround especially for op-by-op mode.
-  # (https://github.com/jax-ml/jax/issues/653).
-  k = 16
-  while len(arrays_out) > 1:
-    arrays_out = [lax.concatenate(arrays_out[i:i+k], axis)
-                  for i in range(0, len(arrays_out), k)]
-  return arrays_out[0]
+  return lax.concatenate(arrays_out, axis)
+
 
 
 @export
