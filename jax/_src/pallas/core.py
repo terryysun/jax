@@ -28,6 +28,7 @@ import threading
 from typing import Any, ClassVar, Protocol, TypeAlias, Union, runtime_checkable
 
 from jax._src import api_util
+from jax._src import checkify
 from jax._src import config
 from jax._src import core as jax_core
 from jax._src import dtypes
@@ -143,6 +144,32 @@ class CompilerParams(Protocol):
   """Base class for compiler parameters."""
   # Subclasses must be dataclasses.
   __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
+
+
+_ENABLE_DEBUG_CHECKS = config.bool_state(
+    "jax_pallas_enable_debug_checks",
+    default=False,
+    help=(
+        "If set, ``pl.debug_check`` calls are checked at runtime. Otherwise,"
+        " they are a noop."
+    ),
+)
+
+
+enable_debug_checks = _ENABLE_DEBUG_CHECKS
+
+
+def debug_checks_enabled() -> bool:
+  """Returns runtime checks are enabled."""
+  return _ENABLE_DEBUG_CHECKS.value
+
+
+def debug_check(condition, message):
+  """Check the condition if
+  :func:`~jax.experimental.pallas.enable_debug_checks` is set, otherwise
+  do nothing.
+  """
+  return checkify.debug_check(condition, message)
 
 
 _backend_lowering_rules = {}

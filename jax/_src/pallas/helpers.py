@@ -18,7 +18,6 @@ import functools
 from typing import Any, TypeVar, cast, overload
 
 from jax._src import api
-from jax._src import checkify
 from jax._src import config
 from jax._src import core as jax_core
 from jax._src import lax as lax
@@ -152,32 +151,6 @@ def loop(
     )
 
   return decorator
-
-
-_ENABLE_DEBUG_CHECKS = config.bool_state(
-    "jax_pallas_enable_debug_checks",
-    default=False,
-    help=(
-        "If set, ``pl.debug_check`` calls are checked at runtime. Otherwise,"
-        " they are a noop."
-    ),
-)
-
-
-enable_debug_checks = _ENABLE_DEBUG_CHECKS
-
-
-def debug_checks_enabled() -> bool:
-  """Returns runtime checks are enabled."""
-  return _ENABLE_DEBUG_CHECKS.value
-
-
-def debug_check(condition, message):
-  """Check the condition if
-  :func:`~jax.experimental.pallas.enable_debug_checks` is set, otherwise
-  do nothing.
-  """
-  return checkify.debug_check(condition, message)
 
 
 def kernel(

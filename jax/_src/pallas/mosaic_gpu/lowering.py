@@ -55,7 +55,6 @@ from jax._src.lib.mlir.dialects import nvvm as nvvm_dialect
 from jax._src.lib.mlir.dialects import scf as scf_dialect
 from jax._src.lib.mlir.dialects import vector as vector_dialect
 from jax._src.pallas import core as pallas_core
-from jax._src.pallas import helpers as pallas_helpers
 from jax._src.pallas import primitives
 from jax._src.pallas import utils as pallas_utils
 from jax._src.pallas.mosaic_gpu import core as gpu_core
@@ -4293,7 +4292,7 @@ def _check_lowering_rule(ctx: LoweringRuleContext, *err_args, err_tree, debug):
         "Non-debug checks are not supported by the Mosaic GPU backend."
         " Functionalize them via `jax.experimental.checkify`."
     )
-  if not pallas_helpers.debug_checks_enabled():
+  if not pallas_core.debug_checks_enabled():
     return []
 
   error = jax.tree.unflatten(err_tree, err_args)

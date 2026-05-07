@@ -61,7 +61,6 @@ from jax._src.lib.mlir.dialects import memref
 from jax._src.lib.mlir.dialects import scf
 from jax._src.lib.mlir.dialects import vector
 from jax._src.pallas import core as pallas_core
-from jax._src.pallas import helpers as pallas_helpers
 from jax._src.pallas import primitives
 from jax._src.pallas import utils as pallas_utils
 from jax._src.pallas.mosaic import core as tpu_core
@@ -4900,7 +4899,7 @@ def _check_lowering_rule(
         "Non-debug checks are not supported by the Mosaic backend."
         " Functionalize them via `jax.experimental.checkify`."
     )
-  if not pallas_helpers.debug_checks_enabled():
+  if not pallas_core.debug_checks_enabled():
     return []
 
   error = jax.tree.unflatten(err_tree, err_args)

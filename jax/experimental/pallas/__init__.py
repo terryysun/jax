@@ -26,7 +26,10 @@ from jax._src.pallas.core import Buffered as Buffered
 from jax._src.pallas.core import CompilerParams as CompilerParams
 from jax._src.pallas.core import core_map as core_map
 from jax._src.pallas.core import CostEstimate as CostEstimate
+from jax._src.pallas.core import debug_check as debug_check
+from jax._src.pallas.core import debug_checks_enabled as debug_checks_enabled
 from jax._src.pallas.core import Element as Element
+from jax._src.pallas.core import enable_debug_checks as enable_debug_checks
 from jax._src.pallas.core import GridSpec as GridSpec
 from jax._src.pallas.core import Indirect as Indirect
 from jax._src.pallas.core import lower_as_mlir as lower_as_mlir
@@ -39,12 +42,9 @@ from jax._src.pallas.core import semaphore as semaphore
 from jax._src.pallas.core import Squeezed as Squeezed
 from jax._src.pallas.core import squeezed as squeezed
 from jax._src.pallas.cost_estimate import estimate_cost as estimate_cost
-from jax._src.pallas.helpers import debug_check as debug_check
-from jax._src.pallas.helpers import debug_checks_enabled as debug_checks_enabled
 from jax._src.pallas.helpers import empty as empty
 from jax._src.pallas.helpers import empty_like as empty_like
 from jax._src.pallas.helpers import empty_ref_like as empty_ref_like
-from jax._src.pallas.helpers import enable_debug_checks as enable_debug_checks
 from jax._src.pallas.helpers import kernel as kernel
 from jax._src.pallas.helpers import loop as loop
 from jax._src.pallas.helpers import select_ref as select_ref
