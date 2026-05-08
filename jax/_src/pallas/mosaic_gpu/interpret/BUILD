@@ -46,7 +46,6 @@ py_library(
         ":jaxpr_interpret",
         "//jax",
         "//jax/_src:core",
-        "//jax/_src:lax",
         "//jax/_src:typing",
         "//jax/_src:util",
         "//jax/_src/pallas",

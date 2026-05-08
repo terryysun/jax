@@ -140,10 +140,23 @@ class TPULoggingInfo(LoggingInfo):
 class GPULoggingInfo(LoggingInfo):
   """Logging info for GPU interpret mode."""
 
-  pallas_thread_id: int
+  # The grid point coordinates of the cluster that the thread with `thread_id`
+  # below belongs to. We allow `None` to enable logging when grid point
+  # coordinates are not available. This is the case, in particular, for the
+  # initialization code that the interpreter runs (to allocate buffers etc.)
+  # before executing a kernel (in the grid loop).
+  grid_point_coords: tuple[int, ...] | None
+
+  # The (flat) thread ID within the cluster. Note that all threads in the blocks
+  # in a cluster run concurrently. This thread ID is a single integer that
+  # identifies one of the concurrent threads in the blocks in the cluster.
+  thread_id: int
 
   def get_location_str(self) -> str:
-    return f"Device {self.device_id}, (Pallas) thread {self.pallas_thread_id}"
+    return (
+        f"Device {self.device_id}, grid point: {self.grid_point_coords},"
+        f" thread {self.thread_id}"
+    )
 
 
 class Counter:

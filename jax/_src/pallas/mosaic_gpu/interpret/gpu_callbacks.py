@@ -309,6 +309,7 @@ class HostAllocationKey(HostAllocationRequest):
 
 def _allocate_buffer_for_all_threads(
     device_id: jax.Array,
+    grid_point_coords: jax.Array | None,
     allocation_request_as_array: jax.Array,
     value: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -333,10 +334,15 @@ def _allocate_buffer_for_all_threads(
     ValueError: If the `thread_id` in `allocation_request` is not zero.
   """
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = (
+      tuple(int(x) for x in grid_point_coords)
+      if grid_point_coords is not None
+      else None
+  )
   allocation_request = HostAllocationRequest.from_array(
       allocation_request_as_array
   )
-  del device_id, allocation_request_as_array
+  del device_id, grid_point_coords, allocation_request_as_array
 
   if allocation_request.thread_id != 0:
     raise ValueError(
@@ -375,7 +381,8 @@ def _allocate_buffer_for_all_threads(
         value=np.array(value),
         logging_info=interpret_utils.GPULoggingInfo(
             device_id=device_id_as_int,
-            pallas_thread_id=0,
+            grid_point_coords=grid_point_coords_as_tuple,
+            thread_id=0,
             source_info=source_info,
         ),
     )
@@ -387,6 +394,7 @@ def _allocate_buffer_for_all_threads(
 
 def call_allocate_buffer_for_all_threads(
     device_id: jax.Array,
+    grid_point_coords: jax.Array | None,
     allocation_request_as_array: jax.Array,
     value: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -397,6 +405,7 @@ def call_allocate_buffer_for_all_threads(
       ),
       HostAllocationKey.shape_and_dtype(),
       device_id,
+      grid_point_coords,
       allocation_request_as_array,
       value,
       ordered=True,
@@ -405,6 +414,7 @@ def call_allocate_buffer_for_all_threads(
 
 def _allocate_buffer(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_request_as_array: jax.Array,
     value: jax.Array,
@@ -422,11 +432,12 @@ def _allocate_buffer(
     `AllocationKey` to refer to the allocated buffer.
   """
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   allocation_request = HostAllocationRequest.from_array(
       allocation_request_as_array
   )
-  del device_id, thread_id, allocation_request_as_array
+  del device_id, grid_point_coords, thread_id, allocation_request_as_array
 
   shared_memory = _get_shared_memory()
 
@@ -446,7 +457,8 @@ def _allocate_buffer(
       value=np.array(value),
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -455,6 +467,7 @@ def _allocate_buffer(
 
 def call_allocate_buffer(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_request_as_array: jax.Array,
     value: jax.Array,
@@ -464,6 +477,7 @@ def call_allocate_buffer(
       functools.partial(_allocate_buffer, source_info=source_info),
       HostAllocationKey.shape_and_dtype(),
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_request_as_array,
       value,
@@ -473,23 +487,25 @@ def call_allocate_buffer(
 
 def _deallocate_buffer(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
 ):
   """Decreases the reference count of the buffer with `allocation_key` (Deallocates the buffer if its reference count becomes zero)."""
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   allocation_key = HostAllocationKey.from_array(allocation_key_as_array)
-  del device_id, thread_id, allocation_key_as_array
-
+  del device_id, grid_point_coords, thread_id, allocation_key_as_array
   shared_memory = _get_shared_memory()
 
   shared_memory.deallocate_buffer(
       allocation_key,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -497,6 +513,7 @@ def _deallocate_buffer(
 
 def call_deallocate_buffer(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -505,6 +522,7 @@ def call_deallocate_buffer(
       functools.partial(_deallocate_buffer, source_info=source_info),
       None,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       ordered=True,
@@ -583,6 +601,7 @@ def _validate_transforms(transforms):
 
 def _get(
     device_id: jax.Array,
+    grid_point_coords: jax.Array | None,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     transforms,
@@ -595,9 +614,14 @@ def _get(
 ) -> jax.Array:
   """Performs a read from the buffer for `allocation_key_as_array` from the given device and thread."""
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = (
+      tuple(int(x) for x in grid_point_coords)
+      if grid_point_coords is not None
+      else None
+  )
   thread_id_as_int = int(thread_id)
   allocation_key = HostAllocationKey.from_array(allocation_key_as_array)
-  del device_id, thread_id, allocation_key_as_array
+  del device_id, grid_point_coords, thread_id, allocation_key_as_array
 
   _validate_transforms(transforms)
   # TODO(nrink): Support tiling and swizzling transforms.
@@ -626,7 +650,8 @@ def _get(
       increment_clock=increment_clock,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -684,6 +709,7 @@ def call_get(
     *,
     result_shape_and_dtype,
     device_id: jax.Array,
+    grid_point_coords: jax.Array | None,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     transforms,
@@ -697,6 +723,7 @@ def call_get(
       functools.partial(_get, source_info=source_info, input_name=input_name),
       result_shape_and_dtype,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       transforms,
@@ -709,6 +736,7 @@ def call_get(
 
 def _swap(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     transforms,
@@ -721,6 +749,7 @@ def _swap(
 ) -> jax.Array:
   """Performs a swap into the buffer for `allocation_key` from the given device and thread."""
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   allocation_key = HostAllocationKey.from_array(allocation_key_as_array)
   del device_id, thread_id, allocation_key_as_array
@@ -748,7 +777,8 @@ def _swap(
       increment_clock=increment_clock,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -785,6 +815,7 @@ def call_swap(
     *,
     result_shape_and_dtype,
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     transforms,
@@ -797,6 +828,7 @@ def call_swap(
       functools.partial(_swap, source_info=source_info),
       result_shape_and_dtype,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       transforms,
@@ -809,6 +841,7 @@ def call_swap(
 
 def _allocate_barriers(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     num_arrivals: jax.Array,
     num_barriers: jax.Array,
@@ -816,11 +849,12 @@ def _allocate_barriers(
     source_info: source_info_util.SourceInfo | None = None,
 ) -> jax.Array:
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   num_arrivals_as_int = int(num_arrivals)
   num_barriers_as_int = int(num_barriers)
   ref_count_as_int = int(ref_count)
-  del device_id, thread_id, num_arrivals, num_barriers, ref_count
+  del device_id, grid_point_coords, thread_id, num_arrivals, num_barriers, ref_count
 
   shared_memory = _get_shared_memory()
 
@@ -848,7 +882,8 @@ def _allocate_barriers(
         num_arrivals=num_arrivals_as_int,
         logging_info=interpret_utils.GPULoggingInfo(
             device_id=device_id_as_int,
-            pallas_thread_id=thread_id_as_int,
+            grid_point_coords=grid_point_coords_as_tuple,
+            thread_id=thread_id_as_int,
             source_info=source_info,
         ),
     )
@@ -860,6 +895,7 @@ def _allocate_barriers(
 
 def call_allocate_barriers(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     num_arrivals: jax.Array,
     num_barriers: jax.Array,
@@ -875,6 +911,7 @@ def call_allocate_barriers(
       functools.partial(_allocate_barriers, source_info=source_info),
       result_shape_and_dtype,
       device_id,
+      grid_point_coords,
       thread_id,
       num_arrivals,
       num_barriers,
@@ -885,13 +922,15 @@ def call_allocate_barriers(
 
 def _deallocate_barrier(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
 ):
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
-  del device_id, thread_id
+  del device_id, grid_point_coords, thread_id
 
   assert len(allocation_key_as_array.shape) == 2
   num_barriers = allocation_key_as_array.shape[0]
@@ -908,7 +947,8 @@ def _deallocate_barrier(
         barrier_allocation_key,
         logging_info=interpret_utils.GPULoggingInfo(
             device_id=device_id_as_int,
-            pallas_thread_id=thread_id_as_int,
+            grid_point_coords=grid_point_coords_as_tuple,
+            thread_id=thread_id_as_int,
             source_info=source_info,
         ),
     )
@@ -916,6 +956,7 @@ def _deallocate_barrier(
 
 def call_deallocate_barrier(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -924,6 +965,7 @@ def call_deallocate_barrier(
       functools.partial(_deallocate_barrier, source_info=source_info),
       None,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       ordered=True,
@@ -932,11 +974,13 @@ def call_deallocate_barrier(
 
 def _barrier_wait(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
 ):
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   barrier_key = HostAllocationKey.from_array(allocation_key_as_array)
   del device_id, thread_id, allocation_key_as_array
@@ -951,7 +995,8 @@ def _barrier_wait(
       thread_id_as_int,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -959,6 +1004,7 @@ def _barrier_wait(
 
 def call_barrier_wait(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -967,6 +1013,7 @@ def call_barrier_wait(
       functools.partial(_barrier_wait, source_info=source_info),
       None,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       ordered=True,
@@ -975,14 +1022,16 @@ def call_barrier_wait(
 
 def _barrier_arrive(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
 ):
   device_id_as_int = int(device_id)
+  grid_point_coords_as_tuple = tuple(int(x) for x in grid_point_coords)
   thread_id_as_int = int(thread_id)
   barrier_key = HostAllocationKey.from_array(allocation_key_as_array)
-  del device_id, thread_id, allocation_key_as_array
+  del device_id, grid_point_coords, thread_id, allocation_key_as_array
 
   shared_memory = _get_shared_memory()
 
@@ -993,7 +1042,8 @@ def _barrier_arrive(
       clock,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id_as_int,
-          pallas_thread_id=thread_id_as_int,
+          grid_point_coords=grid_point_coords_as_tuple,
+          thread_id=thread_id_as_int,
           source_info=source_info,
       ),
   )
@@ -1001,6 +1051,7 @@ def _barrier_arrive(
 
 def call_barrier_arrive(
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     allocation_key_as_array: jax.Array,
     source_info: source_info_util.SourceInfo | None = None,
@@ -1009,6 +1060,7 @@ def call_barrier_arrive(
       functools.partial(_barrier_arrive, source_info=source_info),
       None,
       device_id,
+      grid_point_coords,
       thread_id,
       allocation_key_as_array,
       ordered=True,
@@ -1029,6 +1081,9 @@ class DeviceLocalMemoryTransfer:
 
   # The device ID of the device on which the memory transfer is being executed.
   device_id: int
+
+  grid_point_coords: jax.Array
+
   # The thread ID of the thread that has initiated the memory transfer.
   thread_id: int
 
@@ -1090,6 +1145,7 @@ class DeviceLocalMemoryTransfer:
 
     self.data = _get(
         device_id=jnp.int32(self.device_id),
+        grid_point_coords=self.grid_point_coords,
         thread_id=jnp.int32(self.thread_id),
         clock=vc.copy_vector_clock(self.clock),
         increment_clock=False,
@@ -1106,6 +1162,7 @@ class DeviceLocalMemoryTransfer:
     # the result (i.e. the old contents of the destination buffer) is ignored.
     _swap(
         device_id=jnp.int32(self.device_id),
+        grid_point_coords=self.grid_point_coords,
         thread_id=jnp.int32(self.thread_id),
         clock=vc.copy_vector_clock(self.clock),
         increment_clock=False,
@@ -1123,11 +1180,14 @@ class DeviceLocalMemoryTransfer:
         clock=vc.copy_vector_clock(self.clock),
         logging_info=interpret_utils.GPULoggingInfo(
             device_id=self.device_id,
+            grid_point_coords=tuple(int(x) for x in self.grid_point_coords)
+            if self.grid_point_coords is not None
+            else (),
             # Log the Pallas thread ID because this corresponds to the (CPU)
             # thread that is being simulated and is used also to execute the
             # (TMA) memory transfer (instead of logging the TMA thread ID, which
             # is _only_ used for bookeeping in the vector clocks).
-            pallas_thread_id=self.thread_id,
+            thread_id=self.thread_id,
             source_info=self.source_info,
         ),
     )
@@ -1139,6 +1199,7 @@ class DeviceLocalMemoryTransfer:
 def _execute_device_local_memory_transfer(
     *,
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     src_allocation_key_as_array: jax.Array,
     src_transforms: tuple[Any, ...],
@@ -1153,6 +1214,7 @@ def _execute_device_local_memory_transfer(
 
   transfer = DeviceLocalMemoryTransfer(
       device_id=device_id_as_int,
+      grid_point_coords=grid_point_coords,
       thread_id=thread_id_as_int,
       src_allocation_key_as_array=src_allocation_key_as_array,
       src_transforms=src_transforms,
@@ -1170,6 +1232,7 @@ def _execute_device_local_memory_transfer(
 def call_execute_device_local_memory_transfer(
     *,
     device_id: jax.Array,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     src_allocation_key_as_array: jax.Array,
     src_transforms: tuple[Any, ...],
@@ -1184,6 +1247,7 @@ def call_execute_device_local_memory_transfer(
       ),
       None,
       device_id=device_id,
+      grid_point_coords=grid_point_coords,
       thread_id=thread_id,
       src_allocation_key_as_array=src_allocation_key_as_array,
       src_transforms=src_transforms,

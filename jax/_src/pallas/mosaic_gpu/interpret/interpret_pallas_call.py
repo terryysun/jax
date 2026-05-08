@@ -101,7 +101,7 @@ def _allocate_buffers_for_inputs(
     )
     input_buffer_keys.append(
         gpu_callbacks.call_allocate_buffer_for_all_threads(
-            jnp.int32(device_id), allocation_request, value
+            jnp.int32(device_id), None, allocation_request, value
         )
     )
 
@@ -172,7 +172,7 @@ def _allocate_buffers_for_outputs(
           initial_ref_count=num_threads,
       )
       output_buffer_key = gpu_callbacks.call_allocate_buffer_for_all_threads(
-          jnp.int32(device_id), allocation_request, padded_val
+          jnp.int32(device_id), None, allocation_request, padded_val
       )
       output_buffer_keys_and_values.append(
           AllocationKeyAndValue(key=output_buffer_key, value=out_val)
@@ -222,7 +222,7 @@ def _get_kernel_buffers(
       )
       kernel_buffer_keys.append(
           gpu_callbacks.call_allocate_buffer_for_all_threads(
-              jnp.int32(device_id), allocation_request, init_val
+              jnp.int32(device_id), None, allocation_request, init_val
           )
       )
 
@@ -230,7 +230,8 @@ def _get_kernel_buffers(
 
 
 def _get_outputs(
-    device_id: int, output_buffers: Sequence[AllocationKeyAndValue]
+    device_id: int,
+    output_buffers: Sequence[AllocationKeyAndValue],
 ) -> Sequence[Array]:
   """Reads and returns values from the allocated output buffers."""
   outputs = []
@@ -239,6 +240,7 @@ def _get_outputs(
         gpu_callbacks.call_get(
             result_shape_and_dtype=buffer.value,
             device_id=jnp.int32(device_id),
+            grid_point_coords=None,
             thread_id=jnp.int32(0),
             allocation_key_as_array=buffer.key,
             transforms=(),  # Read the entire buffer.
@@ -251,6 +253,7 @@ def _get_outputs(
 def _load_and_store_between_allocation_keys(
     *,
     device_id: int,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     share_and_dtype: Any,
     load_allocation_key: jax.Array,
@@ -260,6 +263,7 @@ def _load_and_store_between_allocation_keys(
   loaded_value = gpu_callbacks.call_get(
       result_shape_and_dtype=share_and_dtype,
       device_id=jnp.int32(device_id),
+      grid_point_coords=grid_point_coords,
       thread_id=thread_id,
       allocation_key_as_array=load_allocation_key,
       transforms=transform,
@@ -267,6 +271,7 @@ def _load_and_store_between_allocation_keys(
   gpu_callbacks.call_swap(
       result_shape_and_dtype=share_and_dtype,
       device_id=jnp.int32(device_id),
+      grid_point_coords=grid_point_coords,
       thread_id=thread_id,
       allocation_key_as_array=store_allocation_key,
       transforms=transform,
@@ -277,6 +282,7 @@ def _load_and_store_between_allocation_keys(
 
 def _copy_from_gmem_buffers(
     device_id: int,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     avals: Sequence[Any],
     gmem_buffer_keys: Sequence[jax.Array],
@@ -289,6 +295,7 @@ def _copy_from_gmem_buffers(
       continue
     _load_and_store_between_allocation_keys(
         device_id=device_id,
+        grid_point_coords=grid_point_coords,
         thread_id=thread_id,
         share_and_dtype=aval,
         load_allocation_key=gmem_buffer_key,
@@ -299,6 +306,7 @@ def _copy_from_gmem_buffers(
 
 def _copy_to_gmem_buffers(
     device_id: int,
+    grid_point_coords: jax.Array,
     thread_id: jax.Array,
     avals: Sequence[Any],
     source_buffer_keys: Sequence[jax.Array],
@@ -311,6 +319,7 @@ def _copy_to_gmem_buffers(
       continue
     _load_and_store_between_allocation_keys(
         device_id=device_id,
+        grid_point_coords=grid_point_coords,
         thread_id=thread_id,
         share_and_dtype=aval,
         load_allocation_key=source_buffer_key,
@@ -420,6 +429,7 @@ def interpret_pallas_call(
     # `BlockSpec`s. (Currently only trivial `BlockSpec`s are supported.)
     _copy_from_gmem_buffers(
         device_id=device_info.device_id,
+        grid_point_coords=grid_point_coords,
         thread_id=thread_id,
         avals=[var.aval for var in input_vars],
         gmem_buffer_keys=input_buffer_keys,
@@ -445,6 +455,7 @@ def interpret_pallas_call(
     # `BlockSpec`s. (Currently only trivial `BlockSpec`s are supported.)
     _copy_to_gmem_buffers(
         device_id=device_info.device_id,
+        grid_point_coords=grid_point_coords,
         thread_id=thread_id,
         avals=[var.aval for var in output_vars],
         source_buffer_keys=kernel_output_buffer_keys,
