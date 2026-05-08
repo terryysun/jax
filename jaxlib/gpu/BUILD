@@ -71,7 +71,6 @@ exports_files(srcs = [
     "triton.cc",
     "triton_kernels.cc",
     "triton_kernels.h",
-    "triton_support.cc",
     "triton_utils.cc",
     "triton_utils.h",
     "vendor.h",
