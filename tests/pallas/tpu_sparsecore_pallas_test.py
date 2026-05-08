@@ -1277,31 +1277,31 @@ class VectorSubcoreTest(PallasSCTest):
     np.testing.assert_array_equal(kernel(x), np.broadcast_to(expected, x.shape))
 
   def test_fetch_and_add(self):
+    self.skip_if_tc_tiling("Needs a rewrite to support TC tiling")
     if not jtu.is_cloud_tpu_at_least(2026, 4, 5):
       self.skipTest("Needs a newer libtpu")
 
     n = self.sc_info.num_subcores
     dim = self.num_lanes
 
-    @functools.partial(
-        pl.pallas_call,
-        compiler_params=pltpu.CompilerParams(
-            kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE,
-            dimension_semantics=["subcore_parallel"],
-        ),
-        out_shape=(
+    @self.kernel(
+        out_type=(
             jax.ShapeDtypeStruct((n * dim,), jnp.int32),
             jax.ShapeDtypeStruct((n * dim,), jnp.int32),
         ),
-        grid=(n,),
-        out_specs=(
-            pl.BlockSpec([dim], lambda i: (i,)),
-            pl.BlockSpec([dim], lambda i: (i,)),
+        mesh=plsc.VectorSubcoreMesh(
+            core_axis_name="core", subcore_axis_name="subcore", num_cores=1
         ),
-        scratch_shapes=(pltpu.SMEM([1], jnp.int32),),
+        scratch_types=dict(
+            old_val_ref=pltpu.VMEM((dim,), jnp.int32),
+            new_val_ref=pltpu.VMEM((dim,), jnp.int32),
+            smem_ref=pltpu.SMEM([1], jnp.int32),
+        ),
     )
-    def kernel(old_val_ref, new_val_ref, smem_ref):
-      my_id = pl.program_id(0)
+    def kernel(
+        old_val_hbm_ref, new_val_hbm_ref, *, old_val_ref, new_val_ref, smem_ref
+    ):
+      my_id = lax.axis_index("subcore")
       smem_ref[0] = my_id
       plsc.subcore_barrier()
       neighbor_id = (my_id + 1) % n
@@ -1312,6 +1312,13 @@ class VectorSubcoreTest(PallasSCTest):
       new_val = smem_ref[0]
       old_val_ref[...] = jax.lax.broadcast(old_val, old_val_ref.shape)
       new_val_ref[...] = jax.lax.broadcast(new_val, new_val_ref.shape)
+      pltpu.sync_copy(
+          (old_val_ref, new_val_ref),
+          (
+              old_val_hbm_ref.at[pl.ds(my_id * dim, dim)],
+              new_val_hbm_ref.at[pl.ds(my_id * dim, dim)],
+          ),
+      )
 
     old, new = kernel()
     old = old.reshape(n, dim)
@@ -1798,7 +1805,7 @@ class VectorSubcoreTest(PallasSCTest):
 
     np.testing.assert_array_equal(kernel(x), x + 1)
 
-  def test_barrier_via_mesh(self):
+  def test_barrier(self):
     if self.USE_TC_TILING and not jtu.is_cloud_tpu_at_least(2026, 4, 7):
       self.skipTest("Broken after enabling tiled DMAs by default (b/483801998)")
 
@@ -1824,45 +1831,6 @@ class VectorSubcoreTest(PallasSCTest):
                       vmem_ref.at[subcore_id])
       pltpu.sync_copy(vmem_ref.at[subcore_id], o_ref.at[subcore_id])
     expected = 2 * jnp.roll(jnp.arange(mesh.num_subcores), -1)
-    expected = jnp.broadcast_to(expected[:, None], (mesh.num_subcores, vec_dim))
-    np.testing.assert_array_equal(kernel(), expected)
-
-  def test_barrier_via_pallas_call(self):
-    mesh = plsc.VectorSubcoreMesh(
-        core_axis_name="core", subcore_axis_name="subcore", num_cores=1
-    )
-    vec_dim = self.num_lanes
-    nsubcores = self.sc_info.num_subcores
-
-    @functools.partial(
-        pl.pallas_call,
-        grid=nsubcores,
-        compiler_params=pltpu.CompilerParams(
-            kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE,
-            dimension_semantics=["subcore_parallel"],
-            use_tc_tiling_on_sc=self.USE_TC_TILING,
-        ),
-        out_shape=jax.ShapeDtypeStruct(
-            shape=(mesh.num_subcores, vec_dim), dtype=jnp.uint32
-        ),
-        out_specs=pl.BlockSpec((1, vec_dim), lambda i: (i, 0)),
-        scratch_shapes=(
-            pltpu.VMEM_SHARED((mesh.num_subcores, vec_dim), jnp.uint32),
-            pltpu.VMEM((vec_dim,), jnp.uint32),
-        ),
-    )
-    def kernel(o_ref, shared_ref, vmem_ref):
-      subcore_id = pl.program_id(0)
-      @pl.loop(0, 10 * subcore_id + 1)
-      def _(i):
-        vmem_ref[:] = jnp.full(vec_dim, i, dtype=jnp.uint32)
-        pltpu.sync_copy(vmem_ref, shared_ref.at[subcore_id])
-      plsc.subcore_barrier()
-      pltpu.sync_copy(
-          shared_ref.at[(subcore_id + 1) % mesh.num_subcores], o_ref.at[0]
-      )
-
-    expected = 10 * jnp.roll(jnp.arange(mesh.num_subcores), -1)
     expected = jnp.broadcast_to(expected[:, None], (mesh.num_subcores, vec_dim))
     np.testing.assert_array_equal(kernel(), expected)
 
@@ -1912,31 +1880,30 @@ class VectorSubcoreTest(PallasSCTest):
     mesh = plsc.VectorSubcoreMesh(
         core_axis_name="core", subcore_axis_name="subcore", num_cores=1
     )
-    @functools.partial(
-        pl.pallas_call,
-        grid=mesh.num_subcores,
-        compiler_params=pltpu.CompilerParams(
-            kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE,
-            dimension_semantics=["subcore_parallel"],
-            use_tc_tiling_on_sc=self.USE_TC_TILING,
-        ),
-        out_shape=jax.ShapeDtypeStruct(shape[1:], dtype),
-        out_specs=pl.BlockSpec(
-            shape[1:], lambda i: (0,), memory_space=pltpu.HBM
-        ),
-        in_specs=[
-            pl.BlockSpec(shape, lambda *_: (0, 0), memory_space=pltpu.HBM),
-            pl.BlockSpec(shape[1:], lambda _: (0,)),
-        ],
-        scratch_shapes=dict(
+    @self.kernel(
+        out_type=jax.ShapeDtypeStruct(shape[1:], dtype),
+        mesh=mesh,
+        scratch_types=dict(
             shared_scratch_ref=pltpu.VMEM_SHARED(shape[1:], dtype),
-            scratch_refs=[pltpu.VMEM(shape[1:], dtype)],
+            scratch_ref=pltpu.VMEM(shape[1:], dtype),
+            indices_ref=pltpu.VMEM([32], jnp.int32),
         ),
     )
-    def kernel(x_ref, indices_ref, o_ref, *, shared_scratch_ref, scratch_refs):
-      [scratch_ref] = scratch_refs
-      subcore_id = pl.program_id(0)
-      pltpu.sync_copy(x_ref.at[subcore_id], scratch_ref)
+    def kernel(
+        x_hbm_ref,
+        indices_hbm_ref,
+        o_ref,
+        *,
+        shared_scratch_ref,
+        scratch_ref,
+        indices_ref,
+    ):
+      subcore_id = lax.axis_index("subcore")
+      pltpu.sync_copy(
+          (indices_hbm_ref, x_hbm_ref.at[subcore_id]),
+          (indices_ref, scratch_ref),
+      )
+
       # Subcore 0 to init shared scratch.
       @pl.when(subcore_id == 0)
       def _():
@@ -2279,23 +2246,6 @@ class VectorSubcoreTestWithTCTiling(VectorSubcoreTest):
 
 class ScalarSubcoreTest(PallasSCTest):
 
-  def test_pallas_call(self):
-    @functools.partial(
-        pl.pallas_call,
-        out_shape=jax.ShapeDtypeStruct((self.num_lanes,), jnp.int32),
-        compiler_params=pltpu.CompilerParams(
-            kernel_type=pltpu.CoreType.SC_SCALAR_SUBCORE,
-            use_tc_tiling_on_sc=self.USE_TC_TILING,
-        ),
-    )
-    def kernel(x, out):
-      @pl.loop(0, x.size)
-      def _(i):
-        out[i] = x[i] + 1
-
-    x = jnp.arange(self.num_lanes)
-    np.testing.assert_array_equal(kernel(x), x + 1)
-
   def test_copy(self):
     x = jnp.arange(self.num_lanes)
 
@@ -2429,16 +2379,10 @@ class ScalarSubcoreTest(PallasSCTest):
   def test_dma_memory_space(self):
     x = jnp.arange(self.num_lanes)
 
-    @functools.partial(
-        pl.pallas_call,
-        compiler_params=pltpu.CompilerParams(
-            kernel_type=pltpu.CoreType.SC_SCALAR_SUBCORE,
-        ),
-        grid=(1,),
-        in_specs=[pl.BlockSpec(memory_space=pltpu.HBM)],
-        out_shape=x,
-        out_specs=pl.BlockSpec(memory_space=pltpu.HBM),
-        scratch_shapes=(pltpu.SemaphoreType.DMA,),
+    @self.kernel(
+        out_type=x,
+        mesh=plsc.ScalarSubcoreMesh(axis_name="core", num_cores=1),
+        scratch_types=(pltpu.SemaphoreType.DMA,),
     )
     def kernel(x_ref, o_hbm_ref, sem):
       pltpu.async_copy(x_ref, o_hbm_ref, sem).wait()
@@ -2761,23 +2705,20 @@ class PallasSparsecoreAsyncTest(PallasSCTest):
     def foo(x):
       sc_mesh = plsc.ScalarSubcoreMesh(axis_name="core", num_cores=1)
 
-      sem = pl.pallas_call(
-          lambda _: None,
-          out_shape=pltpu.SemaphoreType.DMA(()),
-          out_specs=pl.BlockSpec(memory_space=pltpu.SEMAPHORE),
-          grid=(1,),
-          compiler_params=pltpu.CompilerParams(
-              dimension_semantics=["core_parallel"],
-              kernel_type=pltpu.CoreType.SC_SCALAR_SUBCORE,
-              use_tc_tiling_on_sc=self.USE_TC_TILING,
-          ),
+      sem = self.kernel(out_type=pltpu.SemaphoreType.DMA(()), mesh=sc_mesh)(
+          lambda _: None
       )()
 
       sem_ref = jax.new_ref(sem, memory_space=pltpu.SEMAPHORE)
       y_ref = pl.empty_ref_like(pltpu.HBM(x.shape, x.dtype))
       x_ref = jax.new_ref(x)
 
-      run_kernel = pl.core_map(mesh=sc_mesh)
+      run_kernel = pl.core_map(
+          mesh=sc_mesh,
+          compiler_params=pltpu.CompilerParams(
+              use_tc_tiling_on_sc=self.USE_TC_TILING,
+          ),
+      )
 
       @run_kernel
       def _():
@@ -2844,61 +2785,49 @@ class PallasTpuSparseCoreLoweringErrorTest(jtu.JaxTestCase):
     if not jtu.test_device_matches(["tpu", "cpu"]):
       self.skipTest("Test only works on TPU or CPU.")
 
+  def mock_sc_scalar_subcore_mesh(self):
+    mesh = mock.MagicMock()
+    mesh.axis_names = ("x",)
+    mesh.axis_sizes = {"x": 1}
+    mesh.shape = {"x": 1}
+    mesh.core_type = pltpu.CoreType.SC_SCALAR_SUBCORE
+    mesh.dimension_semantics = [pltpu.GridDimensionSemantics.PARALLEL]
+    mesh.default_memory_space = pltpu.SMEM
+    return mesh
+
   def test_sparsecore_availability_check(self):
 
-    def pallas_kernel(x_ref, o_ref):  # pylint: disable=unused-argument
-      pass
-
     @jax.jit
-    def kernel(x):
-      return pl.pallas_call(
-          pallas_kernel,
-          out_shape=jax.ShapeDtypeStruct(x.shape, x.dtype),
-          compiler_params=pltpu.CompilerParams(
-              kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE
-          ),
-      )(x)
-
-    x = jnp.ones((8,), dtype=jnp.bfloat16)
+    @pl.kernel(
+        out_type=jax.ShapeDtypeStruct((8,), jnp.float32),
+        mesh=self.mock_sc_scalar_subcore_mesh(),
+    )
+    def kernel(o_hbm_ref):
+      del o_hbm_ref  # Unused.
 
     if tpu_info.is_tpu_device():
       if tpu_info.get_tpu_info().sparse_core is None:
         with self.assertRaisesRegex(
             ValueError, "SparseCore is not available on the current device"
         ):
-          kernel.lower(x).compile()
+          kernel.lower().compile()
       else:
         # Should work on devices with SparseCore
-        hlo = kernel.lower(x).as_text("hlo")
+        hlo = kernel.lower().as_text("hlo")
         self.assertIn("custom-call", hlo)
     else:
       with self.assertRaisesRegex(
           ValueError,
           "Only interpret mode is supported on CPU",
       ):
-        kernel.lower(x).compile()
+        kernel.lower().compile()
 
   def test_mpmd_map_sparsecore_availability_check(self):
-    mesh = mock.MagicMock()
-    mesh.devices = tuple(jax.devices()[:1])
-    mesh.axis_names = ("x",)
-    mesh.axis_sizes = {"x": 1}
-    mesh.shape = {"x": 1}
-    mesh.core_type = pltpu.CoreType.SC_VECTOR_SUBCORE
-    mesh.dimension_semantics = [pltpu.GridDimensionSemantics.PARALLEL]
-    mesh.default_memory_space = pltpu.VMEM
-
-    def kernel_fn(x_ref, o_ref):  # pylint: disable=unused-argument
-      pass
-
     @jax.jit
     def run_mpmd(x):
       return mpmd.mpmd_map(
-          [(mesh, kernel_fn)],
+          [(self.mock_sc_scalar_subcore_mesh(), lambda *_: None)],
           out_types=jax.ShapeDtypeStruct(x.shape, x.dtype),
-          compiler_params=pltpu.CompilerParams(
-              kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE
-          ),
       )(x)
 
     x = jnp.ones((8,), dtype=jnp.bfloat16)

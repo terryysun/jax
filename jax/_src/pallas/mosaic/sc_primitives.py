@@ -473,14 +473,8 @@ def _barrier_lowering_rule(ctx: sc_lowering.LoweringRuleContext):
 def subcore_barrier():
   """Blocks until all subcores on the same core reach this instruction.
 
-  The barrier must be used with the vector subcore, either via
-  :class:jax.experimental.pallas.tpu_sc.VectorSubcoreMesh or by passing::
-
-      pltpu.CompilerParams(
-          kernel_type=pltpu.CoreType.SC_VECTOR_SUBCORE,
-          dimension_semantics[..., "subcore_parallel", ...])
-
-  to ``pallas_call``.
+  The barrier must be used with
+  :class:jax.experimental.pallas.tpu_sc.VectorSubcoreMesh.
   """
   barrier_p.bind()
 

@@ -374,12 +374,13 @@ def _mpmd_map_fallback_lowering(
   [jaxpr] = jaxprs
   [mesh] = meshes
 
-  if hasattr(mesh, "dimension_semantics"):
-    compiler_params = compiler_params.replace(
-        dimension_semantics=mesh.dimension_semantics
-    )
-  if hasattr(mesh, "core_type"):
-    compiler_params = compiler_params.replace(kernel_type=mesh.core_type)
+  if compiler_params is not None:
+    if hasattr(mesh, "dimension_semantics"):
+      compiler_params = compiler_params.replace(
+          dimension_semantics=mesh.dimension_semantics
+      )
+    if hasattr(mesh, "core_type"):
+      compiler_params = compiler_params.replace(kernel_type=mesh.core_type)
 
   num_scratch = len(jaxpr.invars) - len(in_nodes) - len(out_avals)
   scratch_avals = (
