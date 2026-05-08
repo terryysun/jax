@@ -984,17 +984,6 @@ pallas_tpu_interpret_mode_context_manager = config_ext.Config(
     include_in_trace_context=True,
 )
 
-class UserConfig:
-  def __init__(self, default_value):
-    self._obj = config_ext.Config("user_context", default_value, include_in_jit_key=True,
-                                  include_in_trace_context=True)
-
-  @property
-  def value(self):
-    return self._obj.value
-
-  def __call__(self, new_value):
-    return UserContext(self._obj, new_value)
 
 class UserContext:
   __slots__ = ["_config", "_new_value", "_prev_value"]
@@ -1009,6 +998,27 @@ class UserContext:
   def __exit__(self, exc_type, exc_val, exc_tb):
     self._config.set_local(self._prev_value)
 
+
+class UserConfig:
+  def __init__(self, default_value):
+    self._obj = config_ext.Config(
+        "user_context", default_value, include_in_jit_key=True,
+        include_in_trace_context=True)
+
+  @property
+  def value(self):
+    return self._obj.value
+
+  def get_global(self):
+    return self._obj.get_global()
+
+  def set_global(self, new_value):
+    return self._obj.set_global(new_value)
+
+  def __call__(self, new_value):
+    return UserContext(self._obj, new_value)
+
+
 def make_user_context(default_value=None):
   """Creates a `jax.jit` cache sensitive context.
 
@@ -1016,8 +1026,9 @@ def make_user_context(default_value=None):
   cache won't get a hit and the jitted function will be re-traced, re-lowered
   and re-compiled.
 
-  This function is not thread-safe. Do not call it concurrently with other JAX
-  APIs.
+  Adding new user contexts is not thread-safe. Do not call make_user_context
+  concurrently with other JAX APIs. However, using a user context once it has
+  been constructed is thread-safe.
 
   Example:
 
@@ -1033,8 +1044,7 @@ def make_user_context(default_value=None):
     f(1.)  # tracing cache miss
   ```
   """
-  obj = UserConfig(default_value)
-  return obj
+  return UserConfig(default_value)
 
 
 # TODO(b/214340779): remove flag when XLA:CPU is improved.

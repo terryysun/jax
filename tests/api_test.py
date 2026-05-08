@@ -5357,6 +5357,21 @@ class APITest(jtu.JaxTestCase):
           f(1.)
     self.assertEqual(tracing_count(), 4)
 
+  @jtu.thread_unsafe_test()  # make_user_context() is not thread-safe at the moment
+  def test_user_context_global(self):
+    my_config = jax.make_user_context()
+
+    @jax.jit
+    def f(x):
+      return x
+
+    prev_val = my_config.get_global()
+    try:
+      my_config.set_global(2)
+      self.assertEqual(my_config.get_global(), 2)
+    finally:
+      my_config.set_global(prev_val)
+
   # TODO(mattjj,dougalm): re-enable if we set auto_dce=True by default
   # @jtu.run_on_devices('cpu')
   # def test_implicit_dce(self):
