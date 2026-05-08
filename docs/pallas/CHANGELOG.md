@@ -17,6 +17,11 @@ Remember to align the itemized text with the first line of an item within a list
 
   * Added {func}`jax.experimental.pallas.align_to`, a utility that rounds a
     value up to the nearest multiple of a given alignment.
+  * {func}`jax.experimental.pallas.pallas_call` no longer supports checkify.
+    We expect this change to affect few users, as in our experience most
+    kernels either perform no checking or use
+    {func}`jax.experimental.pallas.debug_check` for conditionally-enabled
+    runtime checks.
 
 ### Mosaic GPU
 
