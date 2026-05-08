@@ -1676,8 +1676,8 @@ def jaxpr_subcomp(
       else:
         raise NotImplementedError(
             "Unimplemented primitive in Pallas TPU lowering for"
-            f" {ctx.kernel_type}: {eqn.primitive.name}. Please file an issue on"
-            " https://github.com/jax-ml/jax/issues."
+            f" {ctx.kernel_type}: {eqn.primitive.name}. Please file an issue at"
+            " https://github.com/jax-ml/jax/issues/new/choose."
         )
       if eqn.primitive.multiple_results:
         foreach(write_env, eqn.outvars, ans)

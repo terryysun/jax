@@ -1235,11 +1235,11 @@ def lower_jaxpr_to_mosaic_gpu(
       if eqn.primitive not in mosaic_lowering_rules[
           (module_ctx.lowering_semantics, module_ctx.primitive_semantics)]:
         raise NotImplementedError(
-            "Unimplemented primitive in Pallas Mosaic GPU lowering: "
-            f"{eqn.primitive.name} for lowering semantics "
-            f"{module_ctx.lowering_semantics} and user thread semantics "
-            f"{module_ctx.primitive_semantics}. "
-            "Please file an issue on https://github.com/jax-ml/jax/issues."
+            "Unimplemented primitive in Pallas Mosaic GPU lowering:"
+            f" {eqn.primitive.name} for lowering semantics"
+            f" {module_ctx.lowering_semantics} and user thread semantics"
+            f" {module_ctx.primitive_semantics}. Please file an issue at"
+            " https://github.com/jax-ml/jax/issues/new/choose."
         )
       new_local_name_stack = [scope.name for scope in eqn.source_info.name_stack.stack]
       popped, pushed = _compute_name_stack_updates(last_local_name_stack, new_local_name_stack)

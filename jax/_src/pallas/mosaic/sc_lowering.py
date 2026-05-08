@@ -527,9 +527,8 @@ def lower_jaxpr_to_func(
     func_op.verify()
   except Exception as e:
     raise ValueError(
-        f"Body failed to verify: {func_op}.\nThis is an internal error."
-        " Please report a bug at:"
-        " https://github.com/jax-ml/jax/issues/new?assignees=sharadmv."
+        f"Body failed to verify: {func_op}.\nThis is an internal error. Please"
+        " report a bug at https://github.com/jax-ml/jax/issues/new/choose."
     ) from e
   return func_op
 

@@ -432,7 +432,7 @@ class PallasCallTest(ptu.PallasTest):
     # lower.
     with self.assertRaisesRegex(
         NotImplementedError,
-        "Unimplemented primitive in Pallas GPU lowering: print_layout."
+        "Unimplemented primitive in Pallas Triton lowering: print_layout."
     ):
       add_one_triton(x)
 
