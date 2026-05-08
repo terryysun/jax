@@ -2484,57 +2484,140 @@ class FragmentedArray:
       even_vector_len = vector_len + (vector_len % 2)
       new_registers = np.empty_like(self.registers)
       def do_convert(vec, convert_vec_len):
+        assert convert_vec_len.bit_count() == 1
         # Construct the PTX assembly out of ptx_instr.
         # The complication here is that some of the f4x2 instructions take or
         # return .b8 registers which are not supported by the NVPTX LLVM backend,
         # so we need to convert them to 16-bit at the boundaries.
         assert 4 <= src_bitwidth <= 32
         assert 4 <= tgt_bitwidth <= 16
-        tgt_pair_int_ty = ir.IntegerType.get_signless(tgt_bitwidth * 2)
-        tgt_ptx_pair_int_ty = ir.IntegerType.get_signless(max(16, tgt_bitwidth * 2))
-        tgt_ptx_constraint = "=r" if tgt_bitwidth == 16 else "=h"
-        src_ptx_constraint = ",r" if src_bitwidth >= 16 else ",h"
-        ptx_constraints = (
-          tgt_ptx_constraint + src_ptx_constraint * (1 + (src_bitwidth == 32))
-        )
+        src_vec_bitwidth = src_bitwidth * convert_vec_len
+        tgt_vec_bitwidth = tgt_bitwidth * convert_vec_len
+
+        def get_ptx_constraint(bitwidth):
+          if bitwidth <= 16:
+            return "h", 1
+          return "r", bitwidth // 32
+        src_ptx_constraint, src_regs = get_ptx_constraint(src_vec_bitwidth)
+        tgt_ptx_constraint, tgt_regs = get_ptx_constraint(tgt_vec_bitwidth)
+        ptx_constraints = ["=" + tgt_ptx_constraint] * tgt_regs
+        ptx_constraints += [src_ptx_constraint] * src_regs
+        ptx_constraints = ",".join(ptx_constraints)
+
         ptx_lines = ["{"]
-        if tgt_bitwidth > 4:
-          ptx_tgt_arg = "$0"
-          process_ptx_result = lambda result: result
-        else:
-          ptx_lines.append(".reg .b8 result;")
-          ptx_tgt_arg = "result"
-          process_ptx_result = lambda result: arith.trunci(i8, result)
+        src_packing = 32 // src_bitwidth
         if src_bitwidth == 32:
-          get_ptx_operands = lambda pair_vec: [vector.extract(pair_vec, [], [i]) for i in range(2)]
-          ptx_src_args = "$2, $1"  # 32-bit operands are flipped.
-        elif src_bitwidth >= 8:
-          src_pair_int_ty = ir.IntegerType.get_signless(src_bitwidth * 2)
-          get_ptx_operands = lambda pair_vec: [utils.bitcast(pair_vec, src_pair_int_ty)]
-          ptx_src_args = "$1"
+          # No unpacking necessary.
+          get_ptx_operands = lambda vec: [
+            vector.extract(vec, [], [i]) for i in range(convert_vec_len)
+          ]
+          # Operands are flipped in 32-bit instructions.
+          ptx_operands = [f"${tgt_regs + i + 1}, ${tgt_regs + i}"
+                          for i in range(0, convert_vec_len, 2)]
+        elif src_bitwidth == 16:
+          get_ptx_operands = lambda vec: [
+            utils.bitcast(utils.vector_slice(vec, slice(i, i + 2)), i32)
+            for i in range(0, convert_vec_len, 2)
+          ]
+          ptx_operands = [f"${tgt_regs + i}" for i in range(convert_vec_len // 2)]
+        elif convert_vec_len == 2:  # Single narrow pair
+          if src_bitwidth == 8:
+            get_ptx_operands = lambda vec: [utils.bitcast(vec, i16)]
+            ptx_operands = ["$1"]
+          else:  # NVPTX inline_asm has no support for 8-bit registers...
+            assert src_bitwidth == 4
+            ptx_lines.append(".reg .b8 source_pair;")
+            ptx_lines.append("mov.b16 {source_pair, _}, $1;")
+            get_ptx_operands = lambda vec: [arith.extui(i16, utils.bitcast(vec, i8))]
+            ptx_operands = ["source_pair"]
+        else:  # Multiple narrow pairs
+          assert 4 <= src_bitwidth <= 8
+          assert convert_vec_len > 2
+          ptx_operands = [f"source_pair{i}" for i in range(convert_vec_len // 2)]
+          ptx_lines.append(
+            f".reg .b{src_bitwidth * 2} source_pair<{convert_vec_len // 2}>;")
+          # 4xf4 is still less than 32 bits...
+          pairs_per_src_reg = min(32, src_vec_bitwidth) // (src_bitwidth * 2)
+          for i in range(src_regs):
+            source_pairs = ", ".join(f"source_pair{i * pairs_per_src_reg + j}"
+                                     for j in range(pairs_per_src_reg))
+            ptx_lines.append(
+              f"mov.b{min(32, src_vec_bitwidth)} {{ {source_pairs} }}, ${tgt_regs + i};"
+            )
+          if src_vec_bitwidth < 32:
+            assert src_vec_bitwidth == 16
+            get_ptx_operands = lambda vec: [utils.bitcast(vec, i16)]
+          else:
+            get_ptx_operands = lambda vec: [
+              utils.bitcast(utils.vector_slice(vec, slice(i, i + src_packing)), i32)
+              for i in range(0, convert_vec_len, src_packing)
+            ]
+
+        ptx_lines.append(
+          f".reg .b{tgt_bitwidth * 2} result_pair<{convert_vec_len // 2}>;"
+        )
+        ptx_targets = [f"result_pair{i}" for i in range(convert_vec_len // 2)]
+        for tgt, op in zip(ptx_targets, ptx_operands, strict=True):
+          ptx_lines.append(f"{ptx_instr} {tgt}, {op};")
+
+        tgt_packing = 32 // tgt_bitwidth
+        if tgt_vec_bitwidth > 32:
+          ptx_result_ty = llvm.StructType.get_literal(
+            [i32] * (convert_vec_len // tgt_packing)
+          )
+          def process_ptx_result(ptx_result):
+            vec_32 = ir.VectorType.get((tgt_packing,), tgt_int_ty)
+            elements = [
+                utils.bitcast(llvm.extractvalue(i32, ptx_result, [i]), vec_32)
+                for i in range(convert_vec_len // tgt_packing)
+            ]
+            return utils.vector_concat(elements)
+          assert tgt_packing >= 2
+          ptx_targets_per_out = tgt_packing // 2
+          for out_vec_idx in range(convert_vec_len // tgt_packing):
+            out_targets = ptx_targets[
+              out_vec_idx * ptx_targets_per_out:(out_vec_idx + 1) * ptx_targets_per_out
+            ]
+            if len(out_targets) == 1:
+              [mov_src] = out_targets
+            else:
+              mov_src = f"{{ {', '.join(out_targets) } }}"
+            ptx_lines.append(f"mov.b32 ${out_vec_idx}, {mov_src};")
+        elif tgt_vec_bitwidth >= 16:
+          ptx_result_ty = ir.IntegerType.get_signless(tgt_vec_bitwidth)
+          def process_ptx_result(ptx_result):
+            return utils.bitcast(
+              ptx_result, ir.VectorType.get((convert_vec_len,), tgt_int_ty)
+            )
+          if len(ptx_targets) == 1:
+            [mov_src] = ptx_targets
+          else:
+            mov_src = f"{{ {', '.join(ptx_targets) } }}"
+          ptx_lines.append(f"mov.b{tgt_vec_bitwidth} $0, {mov_src};")
+        elif tgt_vec_bitwidth == 8:  # NVPTX inline_asm has no support for 8-bit registers...
+          ptx_result_ty = i16
+          def process_ptx_result(ptx_result):
+            ptx_result = arith.trunci(i8, ptx_result)
+            return utils.bitcast(
+              ptx_result, ir.VectorType.get((convert_vec_len,), tgt_int_ty)
+            )
+          [ptx_target] = ptx_targets
+          ptx_lines.append(f"mov.b16 $0, {{ {ptx_target}, {ptx_target} }};")
         else:
-          assert src_bitwidth == 4
-          ptx_lines.append(".reg .b8 source;")
-          ptx_lines.append("mov.b16 {source, _}, $1;")
-          ptx_src_args = "source"
-          get_ptx_operands = lambda pair_vec: [arith.extui(i16, utils.bitcast(pair_vec, i8))]
-        ptx_lines.append(f"  {ptx_instr} {ptx_tgt_arg}, {ptx_src_args};")
-        if tgt_bitwidth == 4:
-          ptx_lines.append("mov.b16 $0, {result, result};")
+          raise AssertionError("tgt_bitwidth too small")
+
         ptx_lines.append("}")
         ptx = "\t" + "\n\t".join(ptx_lines)
-        results = []
-        assert convert_vec_len % 2 == 0, convert_vec_len
-        for i in range(0, convert_vec_len, 2):
-          pair_vec = utils.vector_slice(vec, slice(i, i + 2))
-          ptx_result = llvm.inline_asm(
-              tgt_ptx_pair_int_ty, get_ptx_operands(pair_vec), ptx, ptx_constraints
-          )
-          ptx_result = process_ptx_result(ptx_result)
-          assert ptx_result.type == tgt_pair_int_ty
-          results.append(utils.bitcast(ptx_result, ir.VectorType.get((2,), tgt_int_ty)))
-        return utils.vector_concat(results)
+        ptx_result = llvm.inline_asm(
+            ptx_result_ty, get_ptx_operands(vec), ptx, ptx_constraints
+        )
+        result = process_ptx_result(ptx_result)
+        assert result.type == ir.VectorType.get((convert_vec_len,), tgt_int_ty)
+        return result
       longest_useful_vector = 32 // min(src_bitwidth, tgt_bitwidth)
+      # We query the ptxas isa version as a proxy for PTX version. Old ptxas
+      # binaries miscompile some of the patterns we generate here.
+      ptx_isa_version = mgpu_lib._mosaic_gpu_ext._get_ptxas_isa_version()  # type: ignore
       for idx, reg in np.ndenumerate(self.registers):
         reg = utils.bitcast(reg, ir.VectorType.get((vector_len,), src_int_ty))
         if vector_len % 2:
@@ -2543,6 +2626,9 @@ class FragmentedArray:
         base_idx = 0
         result_vecs = []
         while convert_vec_len >= 2:
+          if cur_dtype == f4e2m1fn and convert_vec_len == 4 and ptx_isa_version < 90:
+            convert_vec_len //= 2  # ptxas miscompiles 4xfp4 on CUDA 12.8...
+            continue
           while (next_base_idx := base_idx + convert_vec_len) <= even_vector_len:
             vec = utils.vector_slice(reg, slice(base_idx, next_base_idx))
             new_vec = do_convert(vec, convert_vec_len)

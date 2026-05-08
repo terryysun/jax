@@ -4440,7 +4440,8 @@ class FragmentedArrayTest(TestCase):
     res = mgpu.as_gpu_kernel(
         kernel, (1, 1, 1), (128, 1, 1), values, expected, ()
     )(values)
-    self.assertTrue(np.array_equal(res, expected, equal_nan=True))
+    # assert_array_equal fails when both sides are NaN.
+    np.testing.assert_allclose(res, expected, atol=0, rtol=0, equal_nan=True)
 
   @parameterized.product(
       jax_wide_dtype=(jnp.float32, jnp.float16, jnp.bfloat16, jnp.float8_e5m2, jnp.float8_e4m3fn),
