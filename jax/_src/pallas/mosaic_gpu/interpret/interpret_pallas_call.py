@@ -460,13 +460,11 @@ def interpret_pallas_call(
     thread_map.thread_map(
         _kernel, math.prod(cluster_dims) * num_threads, grid_point_coords
     )
+    # TODO(nrink): Determine if any synchronization between the vector clocks is
+    # required at this point, i.e. when a set of concurrent threads is done.
 
-  # TODO(nrink): Should we only create happens-before here from thread 0 to
-  # the other threads? Currently we update the vector clocks for all threads by
-  # looking at the vector clock of all (other) threads. It should suffice, but
-  # this needs to be confirmed, to update the vector clocks for all threads by
-  # looking only at the vector clock of thread 0 (and at the vector clock for
-  # the thread itself).
+  # Synchronize all clocks before we start launching concurrent threads (in the
+  # body of the `fori_loop` below that loops over the grid points).
   gpu_callbacks.call_update_clocks_for_device_barrier(device_info.device_id)
 
   # TODO(nrink): For now we execute the grid by sequentially looping over the
@@ -475,10 +473,9 @@ def interpret_pallas_call(
   # execute all grid points fully concurrently, e.g. in individual threads.)
   jax.lax.fori_loop(0, num_grid_loop_iterations, _grid_loop_body, None)
 
-  # TODO(nrink): Should we only create happens-before here from the other
-  # threads to thread 0? Analogous to the comment above, it should suffice, but
-  # this needs to be confirmed, to update only the vector clock of thread 0 (and
-  # not the vector clocks for all other threads).
+  # Synchronize all clocks after processing all grid points (i.e. blocks; in the
+  # `fori_loop` above). If we do not do this, then reading the output buffers
+  # in `_get_outputs` below may lead to races being detected.
   gpu_callbacks.call_update_clocks_for_device_barrier(device_info.device_id)
 
   outputs = _get_outputs(device_info.device_id, output_buffers)

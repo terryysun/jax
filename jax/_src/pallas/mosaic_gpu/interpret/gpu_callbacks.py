@@ -127,8 +127,11 @@ def _initialize_shared_memory(
 ):
   global _shared_memory, _races
 
+  # TODO(nrink): With the type annotations above, the explicit `int` casts here
+  # should be redundant. Confirm this and remove the casts.
   num_gpus = int(num_gpus)
   num_threads_per_block = int(num_threads_per_block)
+  num_blocks_per_cluster = int(num_blocks_per_cluster)
   num_total_concurrent_threads = (
       num_gpus * num_threads_per_block * num_blocks_per_cluster
   )
@@ -575,13 +578,13 @@ def _get(
 
   shared_memory = _get_shared_memory()
 
-  global_core_id = shared_memory.get_global_core_id(device_id, thread_id)
+  global_thread_id = shared_memory.get_global_thread_id(device_id, thread_id)
 
   read_range = interpret_utils.to_range(transforms)
   ret, (shape, dtype), clock_ = shared_memory.get_buffer_content(
       allocation_key,
       read_range,
-      global_core_id,
+      global_thread_id,
       increment_clock=increment_clock,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id,
@@ -694,7 +697,7 @@ def _swap(
 
   shared_memory = _get_shared_memory()
 
-  global_core_id = shared_memory.get_global_core_id(device_id, thread_id)
+  global_thread_id = shared_memory.get_global_thread_id(device_id, thread_id)
 
   read_write_range = interpret_utils.to_range(transforms)
   ret, (shape, _), clock_ = shared_memory.swap_buffer_content(
@@ -702,7 +705,7 @@ def _swap(
       read_write_range,
       val,
       mask,
-      global_core_id,
+      global_thread_id,
       increment_clock=increment_clock,
       logging_info=interpret_utils.GPULoggingInfo(
           device_id=device_id,
@@ -1021,10 +1024,7 @@ class DeviceLocalMemoryTransfer:
         barrier_key, self.device_id, self.thread_id
     )
 
-    tma_thread_id = shared_memory.get_next_tma_thread_id(self.device_id)
-    global_tma_thread_id = shared_memory.get_global_thread_id(
-        self.device_id, tma_thread_id
-    )
+    global_tma_thread_id = shared_memory.get_next_tma_thread_id(self.device_id)
     # We use the `clock` from the barrier lookup to synchronize the TMA thread
     # with the Pallas thread that initiated the transfer, i.e. the thread with
     # `self.thread_id`. Note that the barrier lookup was done with
@@ -1036,6 +1036,9 @@ class DeviceLocalMemoryTransfer:
     # A memory transfer should be executed only once. We check this by asserting
     # that `self.data` is `None` at the start of the transfer.
     assert self.data is None
+
+    # TODO(nrink): It might make sense to increment `self.clock` before the
+    # `_get` call already. (There should certainly not be any harm in doing so.)
 
     self.data = _get(
         device_id=np.array(self.device_id),
@@ -1072,7 +1075,11 @@ class DeviceLocalMemoryTransfer:
         clock=vc.copy_vector_clock(self.clock),
         logging_info=interpret_utils.GPULoggingInfo(
             device_id=self.device_id,
-            pallas_thread_id=tma_thread_id,
+            # Log the Pallas thread ID because this corresponds to the (CPU)
+            # thread that is being simulated and is used also to execute the
+            # (TMA) memory transfer (instead of logging the TMA thread ID, which
+            # is _only_ used for bookeeping in the vector clocks).
+            pallas_thread_id=self.thread_id,
             source_info=self.source_info,
         ),
     )
