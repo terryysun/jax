@@ -2991,18 +2991,33 @@ pytype_aval_mappings[Token] = lambda _: abstract_token
 dtypes.canonicalize_value_handlers[Token] = lambda x: x
 
 
-class AbstractTodo(AbstractValue):
+class Future:
+
+  def __init__(self, x, done_fun):
+    self.x = x
+    self.done_fun = done_fun
+
+  def done(self):
+    return self.done_fun(self.x)
+
+  def __repr__(self):
+    return f"Future(type={typeof(self.x)})"
+
+
+class AbstractFuture(AbstractValue):
   def __init__(self, inner_aval):
     self.inner_aval = inner_aval
 
   def __eq__(self, other):
-    return isinstance(other, AbstractTodo) and self.inner_aval == other.inner_aval
+    return (isinstance(other, AbstractFuture) and
+            self.inner_aval == other.inner_aval)
 
   def __hash__(self):
     return hash(self.inner_aval)
 
   def str_short(self, short_dtypes=False, mesh_axis_types=False) -> str:
-    return f'Todo{{{self.inner_aval.str_short(True)}}}'
+    return f'AbstractFuture{{{self.inner_aval.str_short(True)}}}'
+
 
 ### Operations on shapes and dimension sizes.
 

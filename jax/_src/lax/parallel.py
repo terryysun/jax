@@ -2892,51 +2892,41 @@ pbroadcast_start_p = core.Primitive("pbroadcast_start")
 ppermute_start_p = core.Primitive("ppermute_start")
 
 # Asynchronous start functions.
-class Todo:
-
-  def __init__(self, x, done_fun):
-    self.x = x
-    self.done_fun = done_fun
-
-  def done(self):
-    return self.done_fun(self.x)
-
-
 def all_gather_start(*args, **kwargs):
   x = _all_gather_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, all_gather_done_p.bind)
+  return core.Future(x, all_gather_done_p.bind)
 
 
 def psum_start(*args, **kwargs):
   x = _psum_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, psum_done_p.bind)
+  return core.Future(x, psum_done_p.bind)
 
 
 def psum_scatter_start(*args, **kwargs):
   x = _psum_scatter_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, reduce_scatter_done_p.bind)
+  return core.Future(x, reduce_scatter_done_p.bind)
 
 
 def all_to_all_start(*args, **kwargs):
   x = _all_to_all_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, all_to_all_done_p.bind)
+  return core.Future(x, all_to_all_done_p.bind)
 
 
 def pbroadcast_start(*args, **kwargs):
   x = _pbroadcast_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, pbroadcast_done_p.bind)
+  return core.Future(x, pbroadcast_done_p.bind)
 
 
 def ppermute_start(*args, **kwargs):
   x = _ppermute_is_async(*args, **kwargs, is_async=True)
-  return Todo(x, ppermute_done_p.bind)
+  return core.Future(x, ppermute_done_p.bind)
 
 
 # Asynchronous start abstract eval.
 def _start_abstract_eval(q):
   def f(*args, **kwargs):
     aval, effs = q.abstract_eval(*args, **kwargs)
-    return core.AbstractTodo(aval), effs
+    return core.AbstractFuture(aval), effs
   return f
 
 for p, q in [
@@ -2976,7 +2966,7 @@ def _start_lowering(sync_lower):
 
   def f(ctx, x, **kwargs):
     (x_aval,) = ctx.avals_in  # e.g., f32[2, 2]
-    (out_aval,) = ctx.avals_out  # e.g., # AbstractTodo[f32[4, 2]]
+    (out_aval,) = ctx.avals_out  # e.g., # AbstractFuture[f32[4, 2]]
     inner_aval = out_aval.inner_aval  # e.g., f32[4, 2]
     inner_type = mlir.aval_to_ir_type(ctx.module_context, inner_aval)  # e.g., <tensor<4x2xf32>
     # e.g., !stablehlo.future<tensor<4x2xf32>>
@@ -3075,8 +3065,8 @@ _dones_p = [
 
 # Asynchronous done abstract eval and lowering.
 def _done_abstract_eval(aval):
-  if not isinstance(aval, core.AbstractTodo):
-    raise TypeError(f"async done op got {aval}, want core.AbstractTodo")
+  if not isinstance(aval, core.AbstractFuture):
+    raise TypeError(f"async done op got {aval}, want core.AbstractFuture")
   return aval.inner_aval
 
 for p in _dones_p:
