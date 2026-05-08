@@ -9780,6 +9780,63 @@ class ShardingInTypesTest(jtu.JaxTestCase):
                      NamedSharding(mesh, P(None, None, unreduced={'x'})))
 
   @jtu.with_explicit_mesh((2,), 'x')
+  def test_index_update(self, mesh):
+    np1 = np.ones((8, 8), dtype=np.float32)
+    np2 = np.array([0, 2, 4], dtype=np.int32)
+    values = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+
+    params = jax.device_put(np1, P('x', None))
+    inputs = jax.device_put(np2, P(None))
+
+    # Test subtract
+    @jax.jit
+    def f_sub(params, inputs, values):
+      return params.at[inputs, 0].subtract(values, out_sharding=P('x', None))
+
+    out = f_sub(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+    # Test multiply
+    @jax.jit
+    def f_mul(params, inputs, values):
+      return params.at[inputs, 0].multiply(values, out_sharding=P('x', None))
+
+    out = f_mul(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+    # Test divide
+    @jax.jit
+    def f_div(params, inputs, values):
+      return params.at[inputs, 0].divide(values, out_sharding=P('x', None))
+
+    out = f_div(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+    # Test power
+    @jax.jit
+    def f_pow(params, inputs, values):
+      return params.at[inputs, 0].power(values, out_sharding=P('x', None))
+
+    out = f_pow(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+    # Test min
+    @jax.jit
+    def f_min(params, inputs, values):
+      return params.at[inputs, 0].min(values, out_sharding=P('x', None))
+
+    out = f_min(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+    # Test max
+    @jax.jit
+    def f_max(params, inputs, values):
+      return params.at[inputs, 0].max(values, out_sharding=P('x', None))
+
+    out = f_max(params, inputs, values)
+    self.assertEqual(out.sharding, NamedSharding(mesh, P('x', None)))
+
+  @jtu.with_explicit_mesh((2,), 'x')
   def test_out_aval_matches_out_sharding(self, mesh):
     arr = jnp.arange(8)
 
