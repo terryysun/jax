@@ -2343,3 +2343,14 @@ jax_py_test(
         "hypothesis",
     ]),
 )
+
+jax_py_test(
+    name = "hardware_utils_test",
+    srcs = ["hardware_utils_test.py"],
+    deps = [
+        "//jax",
+        "//jax/_src:test_util",
+    ] + py_deps([
+        "absl/testing",
+    ]),
+)
