@@ -3738,6 +3738,29 @@ class PallasCallWarpPrimitiveSemanticsTest(PallasTest):
     result = kernel(x)
     np.testing.assert_array_equal(result, x[32:64])
 
+  def test_warp_specialized_transpose(self):
+    h, w, s = 2, 4, 64
+    dtype = jnp.float32
+
+    def kernel(in_ref, out_ref, smem):
+      smem[...] = in_ref[...]
+
+      @plgpu.warp_map
+      def _(warp_id):
+        @pl.when(warp_id == 0)
+        def _():
+          t = plgpu.transpose_ref(smem, (1, 0, 2))
+          plgpu.copy_smem_to_gmem(t, out_ref)
+          plgpu.wait_smem_to_gmem(0)
+
+    f = self.kernel(
+        kernel,
+        out_shape=jax.ShapeDtypeStruct((w, h, s), dtype),
+        scratch_shapes=(plgpu.SMEM((h, w, s), dtype),),
+    )
+    x = jax.random.uniform(jax.random.key(0), shape=(h, w, s), dtype=dtype)
+    np.testing.assert_array_equal(f(x), jnp.transpose(x, (1, 0, 2)))
+
 
 class PallasCallWarpPrimitiveSemanticsWGTest(
     PallasCallWarpPrimitiveSemanticsTest,
@@ -4878,33 +4901,6 @@ class PallasCallTCGen05Test(PallasTCGen05Test):
     x = jax.random.uniform(jax.random.key(0), shape=(m, k), dtype=dtype)
     y = jax.random.uniform(jax.random.key(1), shape=(k, n), dtype=dtype)
     np.testing.assert_allclose(f(x, y), x @ y, rtol=1e-3)
-
-  def test_warp_specialized_transpose(self):
-    h, w, s = 2, 4, 64
-    dtype = jnp.float32
-
-    def kernel(in_ref, out_ref, smem, tma_barrier):
-      plgpu.copy_gmem_to_smem(in_ref, smem, tma_barrier)
-      plgpu.barrier_wait(tma_barrier)
-
-      @plgpu.warp_map
-      def _(warp_id):
-        @pl.when(warp_id == 0)
-        def _():
-          t = plgpu.transpose_ref(smem, (1, 0, 2))
-          plgpu.copy_smem_to_gmem(t, out_ref)
-          plgpu.wait_smem_to_gmem(0)
-
-    f = self.kernel(
-        kernel,
-        out_shape=jax.ShapeDtypeStruct((w, h, s), dtype),
-        scratch_shapes=(
-            plgpu.SMEM((h, w, s), dtype),
-            plgpu.Barrier(num_arrivals=1),
-        ),
-    )
-    x = jax.random.uniform(jax.random.key(0), shape=(h, w, s), dtype=dtype)
-    np.testing.assert_allclose(f(x), jnp.transpose(x, (1, 0, 2)), rtol=1e-3)
 
   @parameterized.product(
       m=[256],
