@@ -3771,7 +3771,12 @@ def _cond_lowering_rule(ctx: LoweringRuleContext, index, *args, branches,
   # We need to know the result types ahead of time to construct the switch
   # operation. Below we lower the first branch in a throw-away module to
   # extract them.
-  with ir.InsertionPoint(ir.Module.create().body):
+  tmp_module = ir.Module.create()
+  # The module attributes are needed for `get_arch` to work correctly.
+  for k, v in ctx.launch_ctx.module.operation.attributes.items():
+    tmp_module.operation.attributes[k] = v
+
+  with ir.InsertionPoint(tmp_module.body):
     outs = lower_jaxpr_to_mosaic_gpu(
         ctx.module_ctx, ctx.launch_ctx, branches[0].jaxpr, args
     )

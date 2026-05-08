@@ -26,6 +26,7 @@ import tempfile
 import traceback
 import types
 from typing import ClassVar, TYPE_CHECKING
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -2212,6 +2213,28 @@ class PallasCallTest(PallasTest, jtu.CudaArchSpecificTest):
 
     x = jnp.arange(256, dtype=jnp.int32)
     np.testing.assert_array_equal(kernel(x), jnp.broadcast_to(jnp.sum(x) * 3, [256]))
+
+  def test_cond_get_arch(self):
+    shape = (64, 256)
+
+    @functools.partial(
+        self.kernel, out_shape=jax.ShapeDtypeStruct(shape, jnp.bfloat16)
+    )
+    def kernel(x_gmem, o_gmem):
+      x = plgpu.load(x_gmem, (), layout=plgpu.Layout.WGMMA, optimized=False)
+
+      def write_out1():
+        o_gmem[...] = x.astype(jnp.bfloat16) + 1
+
+      def write_out2():
+        o_gmem[...] = x.astype(jnp.bfloat16) + 2
+
+      jax.lax.cond(x_gmem[0, 0] != 0, write_out1, write_out2)
+
+    x = jnp.full(shape, 7, dtype=jnp.int4)
+    with mock.patch.object(mgpu.utils, "get_arch", wraps=mgpu.utils.get_arch) as mock_get_arch:
+      np.testing.assert_array_equal(kernel(x), x.astype(jnp.bfloat16) + 1)
+      mock_get_arch.assert_called()
 
   def test_tile_slicing(self):
     shape = (256, 128)
