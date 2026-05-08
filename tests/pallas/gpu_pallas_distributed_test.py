@@ -602,11 +602,6 @@ class PallasCallRemoteDMATest(TestCase):
     np.testing.assert_allclose(y, jnp.ones_like(y))
 
   def test_semaphore_signal_collective_axes(self):
-    # TODO(b/476264413): Support multimem in multi-thread mode.
-    if jax.local_device_count() > 1:
-      self.monkey_patched_api_was_used = True
-      return  # Multimem not supported in multi-thread mode yet.
-
     if jax.process_index() > 2:
       self.monkey_patched_api_was_used = True
       return  # Only 2 processes needed.
