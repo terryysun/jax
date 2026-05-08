@@ -32,29 +32,31 @@ from jax._src.util import partition_list
 import numpy as np
 
 
-def _pp_slice(context: core.JaxprPpContext, dim, slc: Slice) -> str:
+def _pp_slice(context: core.JaxprPpContext, dim, slc: Slice) -> pp.Doc:
   start, size = slc.start, slc.size
   if isinstance(start, core.Var):
-    start_str = core.pp_var(start, context)
-    size_str = (
-        core.pp_var(size, context) if isinstance(size, core.Var) else str(size)
+    start_doc = core.pp_var(start, context)
+    size_doc = (
+        core.pp_var(size, context) if isinstance(size, core.Var)
+        else pp.text(str(size))
     )
-    return f"{start_str}:{start_str}+{size_str}"
+    return pp.concat(
+      [start_doc, pp.text(":"), start_doc, pp.text("+"), size_doc])
   else:
     start_str = str(start)
     if start == 0:
       start_str = ""
     if isinstance(size, core.Var):
-      size_str = core.pp_var(size, context)
+      size_doc = core.pp_var(size, context)
       if start_str:
-        return f"{start_str}:{start_str}+{size_str}"
+        return pp.text(f"{start_str}:{start_str}+") + size_doc
       else:
-        return f":{size_str}"
+        return pp.concat([pp.text(":"), size_doc])
     else:
       _val = lambda x: x.val if isinstance(x, core.Literal) else x
       end = _val(start) + _val(size)
       end_str = "" if end == dim else str(end)
-      return f"{start_str}:{end_str}"
+      return pp.text(f"{start_str}:{end_str}")
 
 IntIndexer = Union[int, Array, Any]
 DimIndexer = Union[IntIndexer, Slice]
@@ -349,7 +351,9 @@ class NDIndexer(state_types.Transform):
         indices.append(_pp_slice(context, dim, idx))
       else:
         indices.append(core.pp_var(idx, context, print_literal_dtype=False))  # pyrefly: ignore[bad-argument-type]
-    return pp.concat([pp.text("["), pp.text(",".join(indices)), pp.text("]")])
+    return pp.concat([
+      pp.text("["), pp.join(pp.text(","), indices), pp.text("]")
+    ])
 
 
 class DShapedArray:

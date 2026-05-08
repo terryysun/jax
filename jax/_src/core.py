@@ -3560,7 +3560,7 @@ def _check_jaxpr(
       # Check the variable is in-scope and consistently typed.
       if x not in env:
         ctx, _ = ctx_factory()
-        raise JaxprTypeError(f"Variable '{pp_var(x, ctx)}' not defined")
+        raise JaxprTypeError(f"Variable '{x.pretty_print(ctx)}' not defined")
       return env[x]
     elif isinstance(x, Literal):
       # Check that the literal matches its type annotation.
@@ -3581,12 +3581,12 @@ def _check_jaxpr(
     # Check that the variable is not already bound.
     if v in env:
       ctx, _ = ctx_factory()
-      raise JaxprTypeError(f"Variable '{pp_var(v, ctx)}' already bound")
+      raise JaxprTypeError(f"Variable '{v.pretty_print(ctx)}' already bound")
     # Check that the computed type is consistent with the binder annotation.
     if not typematch(v.aval, aval):
       ctx, _ = ctx_factory()
       raise JaxprTypeError(
-          f"Value for variable '{pp_var(v, ctx)}' inconsistently typed "
+          f"Value for variable '{v.pretty_print(ctx)}' inconsistently typed "
           f"as {pp_aval(aval, ctx)} for let-binder of type {pp_aval(v.aval, ctx)}")
 
     # If the variable is not a DropVar, add it to the environment.
@@ -4017,22 +4017,30 @@ class JaxprPpContext:
           isinstance(for_v, Var) and
           for_v not in self.var_names):
         used_like_vars.add(like_v)
-        self.var_names[for_v] = pp_var(like_v, self)
+        self.var_names[for_v] = like_v.pretty_print(self)
 
 
 def pp_var(v: Var | Literal, context: JaxprPpContext, *,
-           print_literal_dtype: bool = True) -> str:
-  return v.pretty_print(context, print_dtype=print_literal_dtype)
+           print_literal_dtype: bool = True,
+           is_binder: bool = False) -> pp.Doc:
+  name = v.pretty_print(context, print_dtype=print_literal_dtype)
+  if (isinstance(v, Var) and not isinstance(v, DropVar)):
+    if is_binder:
+      return pp.text(name, anchor=f"v_{name}")
+    else:
+      return pp.text(name, href=f"#v_{name}")
+  return pp.text(name)
 
 def pp_aval(a: AbstractValue, context: JaxprPpContext) -> str:
   return a.str_short(short_dtypes=True)
 
 def pp_vars(vs: Sequence[Atom], context: JaxprPpContext,
-            *, separator="", print_shapes: bool = False) -> pp.Doc:
+            *, separator="", print_shapes: bool = False,
+            is_binder: bool = False) -> pp.Doc:
   if print_shapes:
     return pp.nest(2, pp.group(
       pp.join(pp.text(separator) + pp.group(pp.brk()), [
-        pp.text(pp_var(v, context)) +
+        pp_var(v, context, is_binder=is_binder) +
         pp.type_annotation(pp.text(":" + pp_aval(v.aval, context)))
         for v in vs
       ])
@@ -4040,7 +4048,7 @@ def pp_vars(vs: Sequence[Atom], context: JaxprPpContext,
   else:
     return pp.nest(2, pp.group(
       pp.join(pp.text(separator) + pp.group(pp.brk()),
-              [pp.text(pp_var(v, context)) for v in vs])
+              [pp_var(v, context, is_binder=is_binder) for v in vs])
     ))
 
 def pp_kv_pair(k:str, v: Any, context: JaxprPpContext, settings: JaxprPpSettings) -> pp.Doc:
@@ -4085,7 +4093,8 @@ def _pp_eqn(eqn: JaxprEqn, context: JaxprPpContext, settings: JaxprPpSettings,
   if params is None:
     params = sorted(eqn.params)
   name_stack_annotation = f'[{eqn.source_info.name_stack}]' if settings.name_stack else None
-  lhs = pp_vars(eqn.outvars, context, print_shapes=settings.print_shapes)
+  lhs = pp_vars(eqn.outvars, context, print_shapes=settings.print_shapes,
+                is_binder=True)
   rhs = [pp.text(eqn.primitive.name, annotation=name_stack_annotation),
          pp_kv_pairs([(p, eqn.params[p]) for p in params], context, settings),
          pp.text(" ") + pp_vars(eqn.invars, context)]
@@ -4104,8 +4113,10 @@ def pp_eqns(eqns: Sequence[JaxprEqn],
 
 def pp_jaxpr_skeleton(jaxpr: Jaxpr, eqns_fn, context: JaxprPpContext,
                       settings: JaxprPpSettings) -> pp.Doc:
-  constvars = pp_vars(jaxpr.constvars, context, print_shapes=settings.print_shapes)
-  invars = pp_vars(jaxpr.invars, context, print_shapes=settings.print_shapes)
+  constvars = pp_vars(jaxpr.constvars, context,
+                      print_shapes=settings.print_shapes, is_binder=True)
+  invars = pp_vars(jaxpr.invars, context, print_shapes=settings.print_shapes,
+                   is_binder=True)
   eqns = eqns_fn()
   outvars = pp.concat([
     pp.text("("), pp_vars(jaxpr.outvars, context, separator=","),

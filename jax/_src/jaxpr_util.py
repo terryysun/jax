@@ -530,6 +530,13 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
   .ansi-bg-47 {{ background-color: white; }}
   .ansi-intensity-1 {{ font-weight: bold; }}
   .ansi-intensity-2 {{ opacity: 0.6; }}
+  @keyframes flash {{
+    0% {{ background-color: #fff59d; }}
+    100% {{ background-color: transparent; }}
+  }}
+  .jump-highlight {{
+    animation: flash 1.5s ease-out forwards;
+  }}
   #search-controls {{
     margin-bottom: 10px;
   }}
@@ -583,6 +590,16 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
     const strings = data.strings;
     const allLines = data.lines;
 
+    const varDefinitions = {{}};
+    const anchorRegex = /<a id="v_([^"]+)"/g;
+    allLines.forEach((line, idx) => {{
+      let match;
+      while ((match = anchorRegex.exec(line)) !== null) {{
+        const varName = match[1];
+        varDefinitions[varName] = idx;
+      }}
+    }});
+
     document.getElementById('total-lines').textContent = `Total lines: ${{allLines.length}}`;
 
     const lineHeight = 18;
@@ -600,6 +617,7 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
     const buffer = 5;
     let matchingLines = [];
     let currentMatchIdx = -1;
+    let highlightedLineIdx = -1;
 
     function renderVisibleLines() {{
       const scrollTop = container.scrollTop;
@@ -620,10 +638,12 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
         const lineAbsoluteIdx = renderedStartIdx + idx;
         const isMatch = matchingLines.includes(lineAbsoluteIdx);
         const isCurrent = currentMatchIdx !== -1 && lineAbsoluteIdx === matchingLines[currentMatchIdx];
+        const isHighlighted = lineAbsoluteIdx === highlightedLineIdx;
 
         let className = "line";
         if (isMatch) className += " search-match";
         if (isCurrent) className += " current-match";
+        if (isHighlighted) className += " jump-highlight";
 
         return `<div class="${{className}}">${{line}}</div>`;
       }}).join('');
@@ -642,6 +662,18 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
     // Event Delegation
     let selectedElement = null;
     container.addEventListener('click', (e) => {{
+      const link = e.target.closest('a[href^="#v_"]');
+      if (link) {{
+        e.preventDefault();
+        const href = link.getAttribute('href');
+        const varName = href.substring(3); // strip "#v_"
+        const lineIdx = varDefinitions[varName];
+        if (lineIdx !== undefined) {{
+          scrollToLine(lineIdx);
+        }}
+        return;
+      }}
+
       const traceable = e.target.closest('.traceable');
       if (traceable) {{
         if (selectedElement) {{
@@ -736,18 +768,30 @@ def jaxpr_to_html(jaxpr: core.Jaxpr) -> str:
       }}
     }}
 
+    function scrollToLine(lineIdx) {{
+      const containerHeight = container.clientHeight;
+      const scale = useScaling ? ((totalHeight - containerHeight) / (MAX_HEIGHT - containerHeight)) : 1.0;
+      const virtualScrollTop = lineIdx * lineHeight;
+      const scrollTop = useScaling ? (virtualScrollTop / scale) : virtualScrollTop;
+
+      container.scrollTop = scrollTop;
+      highlightedLineIdx = lineIdx;
+      renderVisibleLines();
+
+      setTimeout(() => {{
+        if (highlightedLineIdx === lineIdx) {{
+          highlightedLineIdx = -1;
+        }}
+      }}, 1500);
+    }}
+
     function goToMatch(idx) {{
       if (matchingLines.length === 0) return;
       currentMatchIdx = (idx + matchingLines.length) % matchingLines.length;
       updateSearchUI();
 
       const lineIdx = matchingLines[currentMatchIdx];
-      const scale = useScaling ? (totalHeight / MAX_HEIGHT) : 1.0;
-      const virtualScrollTop = lineIdx * lineHeight;
-      const scrollTop = useScaling ? (virtualScrollTop / scale) : virtualScrollTop;
-
-      container.scrollTop = scrollTop;
-      renderVisibleLines();
+      scrollToLine(lineIdx);
     }}
 
     searchInput.addEventListener('input', performSearch);

@@ -89,7 +89,12 @@ class ColorDoc(Doc):
 def nil() -> Doc:
   """An empty document."""
 
-def text(text: str, annotation: str | None = ...) -> Doc:
+def text(
+    text: str,
+    annotation: str | None = ...,
+    anchor: str | None = ...,
+    href: str | None = ...,
+) -> Doc:
   """Literal text."""
 
 def concat(children: Sequence[Doc]) -> Doc:

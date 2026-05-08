@@ -383,9 +383,7 @@ class Indices:
   def pretty_print(
       self, context: jax_core.JaxprPpContext, *, print_dtype: bool = True
   ) -> str:
-    values = jax_core.pp_var(
-        self.values, context, print_literal_dtype=print_dtype
-    )
+    values = self.values.pretty_print(context, print_dtype=print_dtype)
     if self.ignored_value is None:
       return values
     return f"{values}~{self.ignored_value}"

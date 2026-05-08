@@ -507,7 +507,7 @@ def pp_ref_transforms(context: core.JaxprPpContext, ref, transforms=()):
     ref = ref.ref
   return pp_ref_var(
       pp.concat([
-          pp.text(core.pp_var(ref, context)),
+          core.pp_var(ref, context),
           _pp_transforms(context, transforms),
       ])
   )
@@ -540,7 +540,7 @@ def _swap_pp_rule(eqn, context, settings) -> pp.Doc:
     return pp.concat([
         pp_ref_transforms(context, x, transforms),
         pp.text(" <- ", annotation=annotation),
-        pp.text(core.pp_var(v, context)),
+        core.pp_var(v, context),
     ])
   else:
     # pretty-print `y:T = swap x v i` as `y:T, x[i] <- x[i], v`
@@ -548,7 +548,7 @@ def _swap_pp_rule(eqn, context, settings) -> pp.Doc:
     y = core.pp_vars([y], context, print_shapes=settings.print_shapes)
     return pp.concat([y, pp.text(', '), x_i,
                       pp.text(' <- ', annotation=annotation), x_i,
-                      pp.text(', '), pp.text(core.pp_var(v, context))])
+                      pp.text(', '), core.pp_var(v, context)])
 core.pp_eqn_rules[swap_p] = _swap_pp_rule
 
 def _addupdate_pp_rule(eqn, context, settings) -> pp.Doc:
@@ -561,7 +561,7 @@ def _addupdate_pp_rule(eqn, context, settings) -> pp.Doc:
   return pp.concat([
       pp_ref_transforms(context, x, transforms),
       pp.text(" += ", annotation=annotation),
-      pp.text(core.pp_var(v, context)),
+      core.pp_var(v, context),
   ])
 core.pp_eqn_rules[addupdate_p] = _addupdate_pp_rule
 

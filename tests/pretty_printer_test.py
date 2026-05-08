@@ -132,6 +132,18 @@ class PrettyPrinterTest(jtu.JaxTestCase):
         "a&lt;br&gt;b",
     )
 
+  @unittest.skipIf(jaxlib_extension_version < 451, "Requires jaxlib >= 450")
+  def testHtmlLinks(self):
+    doc = pp.concat([
+        pp.text("def", anchor="var_x"),
+        pp.text(" "),
+        pp.text("use", href="#var_x"),
+    ])
+    self.assertEqual(
+        doc.format(output_format=pp.OutputFormat.HTML, use_color=False),
+        '<a id="var_x">def</a> <a href="#var_x">use</a>',
+    )
+
   @unittest.skipIf(jaxlib_extension_version < 450, "Requires jaxlib >= 450")
   def testHtmlSourceMapWithColors(self):
     doc = pp.color(

@@ -161,10 +161,14 @@ class NilDoc final : public Doc {
 
 class TextDoc final : public Doc {
  public:
-  TextDoc(std::string text, std::optional<std::string> annotation)
+  TextDoc(std::string text, std::optional<std::string> annotation,
+          std::optional<std::string> anchor = std::nullopt,
+          std::optional<std::string> href = std::nullopt)
       : Doc(annotation.has_value() ? 1 : 0),
         text_(std::move(text)),
-        annotation_(std::move(annotation)) {}
+        annotation_(std::move(annotation)),
+        anchor_(std::move(anchor)),
+        href_(std::move(href)) {}
   std::string Repr() const override;
   void Fits(std::stack<const Doc*>& agenda, int& width) const override;
   bool Sparse(std::stack<const Doc*>& agenda, int& num_annotations,
@@ -177,6 +181,8 @@ class TextDoc final : public Doc {
  private:
   std::string text_;
   std::optional<std::string> annotation_;
+  std::optional<std::string> anchor_;
+  std::optional<std::string> href_;
 };
 
 class ConcatDoc final : public Doc {
@@ -389,12 +395,19 @@ PyType_Slot ColorDoc::tp_slots[] = {
 std::string NilDoc::Repr() const { return "nil"; }
 
 std::string TextDoc::Repr() const {
+  std::string result = absl::StrFormat("text(\"%s\"", text_);
   if (annotation_.has_value()) {
-    return absl::StrFormat("text(\"%s\", annotation=\"%s\")", text_,
-                           *annotation_);
-  } else {
-    return absl::StrFormat("text(\"%s\")", text_);
+    absl::StrAppend(&result,
+                    absl::StrFormat(", annotation=\"%s\"", *annotation_));
   }
+  if (anchor_.has_value()) {
+    absl::StrAppend(&result, absl::StrFormat(", anchor=\"%s\"", *anchor_));
+  }
+  if (href_.has_value()) {
+    absl::StrAppend(&result, absl::StrFormat(", href=\"%s\"", *href_));
+  }
+  absl::StrAppend(&result, ")");
+  return result;
 }
 
 std::string ConcatDoc::Repr() const {
@@ -738,10 +751,27 @@ void NilDoc::Format(const FormatAgendum& agendum, FormatState& state) const {}
 void TextDoc::Format(const FormatAgendum& agendum, FormatState& state) const {
   absl::StrAppend(&state.line_text,
                   UpdateColor(state.color, state.output_format, agendum.color));
+  bool has_link = (anchor_.has_value() || href_.has_value()) &&
+                  state.output_format == OutputFormat::kHtml;
+  if (has_link) {
+    absl::StrAppend(&state.line_text, "<a");
+    if (anchor_.has_value()) {
+      absl::StrAppend(&state.line_text,
+                      absl::StrFormat(" id=\"%s\"", *anchor_));
+    }
+    if (href_.has_value()) {
+      absl::StrAppend(&state.line_text,
+                      absl::StrFormat(" href=\"%s\"", *href_));
+    }
+    absl::StrAppend(&state.line_text, ">");
+  }
   if (state.output_format == OutputFormat::kHtml) {
     EscapeHtml(&state.line_text, text_);
   } else {
     absl::StrAppend(&state.line_text, text_);
+  }
+  if (has_link) {
+    absl::StrAppend(&state.line_text, "</a>");
   }
   if (annotation_.has_value()) {
     state.line_annotations.push_back(*annotation_);
@@ -1011,11 +1041,15 @@ NB_MODULE(_pretty_printer, m) {
 
   m.def(
       "text",
-      [](std::string text, std::optional<std::string> annotation) -> PyDoc {
-        return MakeDoc<TextDoc>(std::move(text), std::move(annotation));
+      [](std::string text, std::optional<std::string> annotation,
+         std::optional<std::string> anchor,
+         std::optional<std::string> href) -> PyDoc {
+        return MakeDoc<TextDoc>(std::move(text), std::move(annotation),
+                                std::move(anchor), std::move(href));
       },
       nb::arg("text"), nb::arg("annotation").none() = std::nullopt,
-      "Literal text.");
+      nb::arg("anchor").none() = std::nullopt,
+      nb::arg("href").none() = std::nullopt, "Literal text.");
 
   m.def(
       "concat",
