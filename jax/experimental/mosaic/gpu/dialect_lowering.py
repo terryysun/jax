@@ -1956,7 +1956,7 @@ def _memref_subview_op_lowering_rule(
   return [wrapped_ref]
 
 
-@_register_lowering(memref.CastOp)
+@_register_lowering(memref.CastOp, support_warp_semantics=True)
 def _memref_cast_op_lowering_rule(
     ctx: LoweringContext, op: memref.CastOp
 ) -> Sequence[ir.Value]:

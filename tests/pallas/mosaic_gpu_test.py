@@ -3784,6 +3784,29 @@ class PallasCallWarpPrimitiveSemanticsTest(PallasTest):
     x = jax.random.uniform(jax.random.key(0), shape=(h, w, s), dtype=dtype)
     np.testing.assert_array_equal(f(x), jnp.transpose(x, (1, 0, 2)))
 
+  def test_warp_specialized_smem_slice(self):
+    shape = (2, 64, 128)
+    dtype = jnp.float32
+
+    def kernel(in_ref, out_ref, smem):
+      smem[...] = in_ref[...]
+
+      @plgpu.warp_map
+      def _(warp_id):
+        @pl.when(warp_id == 0)
+        def _():
+          plgpu.copy_smem_to_gmem(smem.at[0], out_ref.at[0])
+          plgpu.copy_smem_to_gmem(smem.at[1], out_ref.at[1])
+          plgpu.wait_smem_to_gmem(0)
+
+    f = self.kernel(
+        kernel,
+        out_shape=jax.ShapeDtypeStruct(shape, dtype),
+        scratch_shapes=(plgpu.SMEM(shape, dtype),),
+    )
+    x = jax.random.uniform(jax.random.key(0), shape=shape, dtype=dtype)
+    np.testing.assert_array_equal(f(x), x)
+
 
 class PallasCallWarpPrimitiveSemanticsWGTest(
     PallasCallWarpPrimitiveSemanticsTest,
