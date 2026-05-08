@@ -533,9 +533,8 @@ def _swap_pp_rule(eqn, context, settings) -> pp.Doc:
   transforms = tree_util.tree_unflatten(eqn.params["tree"], flat_idx)
   annotation = (source_info_util.summarize(eqn.source_info)
                 if settings.source_info else None)
-  if type(y) is core.DropVar:
-    # In the case of a set (ignored return value),
-    # pretty print `_ = swap x v i` as `x[i] <- v`
+  if context.var_names.get(y) == '_':
+    # In the case of a set (ignored return value), print as `x[i] <- v`
     del y
     return pp.concat([
         pp_ref_transforms(context, x, transforms),
