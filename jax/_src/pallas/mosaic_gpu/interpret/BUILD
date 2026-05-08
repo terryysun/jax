@@ -86,6 +86,7 @@ pytype_strict_library(
     type_checking = "pyrefly",
     deps = [
         ":gpu_callbacks",
+        ":params",
         "//jax",
         "//jax/_src:core",
         "//jax/_src:lax",
@@ -95,7 +96,6 @@ pytype_strict_library(
         "//jax/_src/pallas/mosaic/interpret:utils",
         "//jax/_src/pallas/mosaic_gpu:core",
         "//jax/_src/pallas/mosaic_gpu:primitives",
-        "//jax/_src/pallas/mosaic_gpu/interpret:params",
         "//jax/experimental:pallas_mosaic_gpu",
     ],
 )
